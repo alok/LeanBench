@@ -1,0 +1,10 @@
+name = "LeanBench"
+version = "0.1.0"
+defaultTargets = ["leanbench"]
+
+[[lean_lib]]
+name = "LeanBench"
+
+[[lean_exe]]
+name = "leanbench"
+root = "Main"
