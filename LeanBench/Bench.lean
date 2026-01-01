@@ -1,4 +1,5 @@
 import Lean
+import Lean.Data.Json
 import Std
 
 namespace LeanBench
@@ -11,12 +12,14 @@ structure BenchConfig where
   tags : List String := []
   bytes : Option Nat := none
   flops : Option Nat := none
+  items : Option Nat := none
   deriving Inhabited
 
 structure Bench where
   name : String
   action : IO Unit
   config : BenchConfig := {}
+  report? : Option (IO Lean.Json) := none
   deriving Inhabited
 
 initialize benchRegistry : IO.Ref (Array Bench) <- IO.mkRef #[]
@@ -88,6 +91,14 @@ macro "bench " name:str " do " seq:doSeq : command =>
 macro "bench " name:str " (" cfg:term ")" " do " seq:doSeq : command =>
   `(initialize (LeanBench.register
     { name := $name, action := (do $seq), config := $cfg }))
+
+macro "bench_report " name:str " (" report:term ")" " do " seq:doSeq : command =>
+  `(initialize (LeanBench.register
+    { name := $name, action := (do $seq), report? := some $report, config := (default : LeanBench.BenchConfig) }))
+
+macro "bench_report " name:str " (" cfg:term ")" " (" report:term ")" " do " seq:doSeq : command =>
+  `(initialize (LeanBench.register
+    { name := $name, action := (do $seq), report? := some $report, config := $cfg }))
 
 macro "bench_suite " name:str : command =>
   `(initialize (LeanBench.registerSuite

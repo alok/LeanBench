@@ -56,6 +56,7 @@ structure BenchResult where
   config : BenchConfig
   stats : BenchStats
   samples : Array Nat
+  extras : Option Lean.Json := none
 
 @[inline] def nsPerMs : Nat := 1_000_000
 @[inline] def nsPerUs : Nat := 1_000
@@ -208,7 +209,11 @@ structure BenchResult where
     samples := samples.push elapsed
     total := total + elapsed
   let stats := statsOf samples
-  pure { entry := entry, config := cfg, stats := stats, samples := samples }
+  let extras ←
+    match entry.report? with
+    | none => pure none
+    | some report => some <$> report
+  pure { entry := entry, config := cfg, stats := stats, samples := samples, extras := extras }
 
 @[inline] def padRight (s : String) (n : Nat) : String :=
   let len := s.length
@@ -230,6 +235,9 @@ structure BenchResult where
 @[inline] def throughputGflops? (r : BenchResult) : Option Float :=
   r.entry.config.flops.map (fun flops => rateFromNs flops r.stats.meanNs)
 
+@[inline] def itemsPerSec? (r : BenchResult) : Option Float :=
+  r.entry.config.items.map (fun items => rateFromNs items r.stats.meanNs)
+
 @[inline] def baselineFor (baseline? : Option (Std.HashMap String Float)) (name : String) : Option Float :=
   match baseline? with
   | none => none
@@ -239,11 +247,13 @@ structure BenchResult where
     (baseline? : Option (Std.HashMap String Float)) (full : Bool) : String := Id.run do
   let hasBytes := results.any (fun r => r.entry.config.bytes.isSome)
   let hasFlops := results.any (fun r => r.entry.config.flops.isSome)
+  let hasItems := results.any (fun r => r.entry.config.items.isSome)
   let baseHeader := #["benchmark", "mean", "min", "max", "stddev", "samples"]
   let extraHeader := if full then #["median", "p95", "p99"] else #[]
   let metricHeader :=
     (if hasBytes then #["GB/s"] else #[]) ++
-    (if hasFlops then #["GFLOP/s"] else #[])
+    (if hasFlops then #["GFLOP/s"] else #[]) ++
+    (if hasItems then #["items/s"] else #[])
   let compareHeader :=
     match baseline? with
     | none => #[]
@@ -271,6 +281,11 @@ structure BenchResult where
       else #[]) ++
       (if hasFlops then
         #[match throughputGflops? r with
+          | some v => formatFloat3 v
+          | none => "-"]
+      else #[]) ++
+      (if hasItems then
+        #[match itemsPerSec? r with
           | some v => formatFloat3 v
           | none => "-"]
       else #[])
@@ -338,6 +353,12 @@ structure BenchResult where
     let gflops := match throughputGflops? r with
       | some v => formatFloat3 v
       | none => "null"
+    let itemsPerSec := match itemsPerSec? r with
+      | some v => formatFloat3 v
+      | none => "null"
+    let extras := match r.extras with
+      | some v => Lean.Json.compress v
+      | none => "null"
     let fields := #[
       "\"name\":\"" ++ name ++ "\"",
       "\"mean_ns\":" ++ r.stats.meanNs.toString,
@@ -350,7 +371,9 @@ structure BenchResult where
       "\"samples\":" ++ toString r.stats.samples,
       "\"total_ns\":" ++ toString r.stats.totalNs,
       "\"bandwidth_gbps\":" ++ bandwidth,
-      "\"throughput_gflops\":" ++ gflops
+      "\"throughput_gflops\":" ++ gflops,
+      "\"items_per_s\":" ++ itemsPerSec,
+      "\"extras\":" ++ extras
     ]
     "{" ++ String.intercalate "," fields.toList ++ "}"
   "[" ++ String.intercalate "," items ++ "]"

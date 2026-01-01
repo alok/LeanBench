@@ -113,6 +113,38 @@ bench "vector_add" (cfg) do
   pure ()
 ```
 
+## Item throughput
+
+Provide per-iteration item counts to emit `items/s`:
+
+```lean
+import LeanBench
+
+def cfg : BenchConfig := {
+  items := some 1024
+}
+
+bench "batch_next" (cfg) do
+  -- run one batch
+  pure ()
+```
+
+## Extras
+
+Attach additional JSON metrics (e.g., stage timing) with `bench_report`:
+
+```lean
+import LeanBench
+import Lean.Data.Json
+
+def reportStats : IO Lean.Json := do
+  pure <| Lean.Json.mkObj [("stage_wait_ns", Lean.Json.num 12345)]
+
+bench_report "pipeline" (reportStats) do
+  -- run one pipeline step
+  pure ()
+```
+
 ## Lake integration
 
 Lake already supports `bench` drivers (like `test`). Configure your package to
