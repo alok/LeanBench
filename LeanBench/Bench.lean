@@ -4,8 +4,8 @@ import Std
 namespace LeanBench
 
 structure BenchConfig where
-  warmup : Nat := 1
-  samples : Nat := 10
+  warmup : Nat := 2
+  samples : Nat := 20
   minTimeMs : Nat := 0
   tags : List String := []
   deriving Inhabited
