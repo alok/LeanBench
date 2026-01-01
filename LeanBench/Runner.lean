@@ -229,14 +229,17 @@ structure BenchResult where
 @[inline] def rateFromNs (units : Nat) (meanNs : Float) : Float :=
   if meanNs <= 0.0 then 0.0 else units.toFloat / meanNs
 
+@[inline] def ratePerSec (units : Nat) (meanNs : Float) : Float :=
+  rateFromNs units meanNs * (Float.ofNat nsPerS)
+
 @[inline] def bandwidthGbps? (r : BenchResult) : Option Float :=
-  r.entry.config.bytes.map (fun bytes => rateFromNs bytes r.stats.meanNs)
+  r.entry.config.bytes.map (fun bytes => ratePerSec bytes r.stats.meanNs / 1.0e9)
 
 @[inline] def throughputGflops? (r : BenchResult) : Option Float :=
-  r.entry.config.flops.map (fun flops => rateFromNs flops r.stats.meanNs)
+  r.entry.config.flops.map (fun flops => ratePerSec flops r.stats.meanNs / 1.0e9)
 
 @[inline] def itemsPerSec? (r : BenchResult) : Option Float :=
-  r.entry.config.items.map (fun items => rateFromNs items r.stats.meanNs)
+  r.entry.config.items.map (fun items => ratePerSec items r.stats.meanNs)
 
 @[inline] def baselineFor (baseline? : Option (Std.HashMap String Float)) (name : String) : Option Float :=
   match baseline? with

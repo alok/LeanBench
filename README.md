@@ -104,8 +104,8 @@ bandwidth (GB/s) and throughput (GFLOP/s) in pretty/JSON output:
 import LeanBench
 
 def cfg : BenchConfig := {
-  bytes := some (3 * 1_000_000 * 4)  -- read 2 + write 1 float arrays
-  flops := some 1_000_000           -- one add per element
+  bytes := some (3 * 1_000_000 * 4)  -- bytes per iteration
+  flops := some 1_000_000           -- flops per iteration
 }
 
 bench "vector_add" (cfg) do
@@ -121,7 +121,7 @@ Provide per-iteration item counts to emit `items/s`:
 import LeanBench
 
 def cfg : BenchConfig := {
-  items := some 1024
+  items := some 1024 -- items per iteration
 }
 
 bench "batch_next" (cfg) do
