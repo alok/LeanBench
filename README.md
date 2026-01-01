@@ -34,9 +34,10 @@ lake exe leanbench -- --samples 20 --warmup 2
 - `--samples <n>` override sample count
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
-- `--format pretty|json|radar`
+- `--format pretty|full|json|radar` (`full` adds median/p95/p99)
 - `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL
 - `--json-out <path>` write JSON to file
+- `--compare <path>` compare against a JSON baseline
 - `--suite <name>` prefix radar names
 
 ## External commands
@@ -46,4 +47,14 @@ Use `benchCmd` to benchmark external commands:
 ```lean
 bench "lean --version" do
   LeanBench.benchCmd "lean" #["--version"]
+```
+
+## Comparison example
+
+```sh
+# create baseline
+lake exe leanbench -- --format json --json-out baseline.json
+
+# compare current run to baseline
+lake exe leanbench -- --compare baseline.json
 ```
