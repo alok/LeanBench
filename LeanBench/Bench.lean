@@ -7,6 +7,7 @@ structure BenchConfig where
   warmup : Nat := 2
   samples : Nat := 20
   minTimeMs : Nat := 0
+  suite : Option String := none
   tags : List String := []
   deriving Inhabited
 

@@ -15,11 +15,15 @@ inductive OutputFormat where
 structure CliConfig where
   format : OutputFormat := .pretty
   listOnly : Bool := false
+  listTags : Bool := false
+  listSuites : Bool := false
   filter : Option String := none
+  filterSuite : Option String := none
+  filterTags : Array String := #[]
   samples? : Option Nat := none
   warmup? : Option Nat := none
   minTimeMs? : Option Nat := none
-  suite : Option String := none
+  radarSuite : Option String := none
   radarOut : Option System.FilePath := none
   jsonOut : Option System.FilePath := none
   comparePath : Option System.FilePath := none
@@ -132,10 +136,40 @@ structure BenchResult where
       | l@(_::tl) => if isPrefix l p then true else loop tl
     loop s
 
-@[inline] def shouldKeep (entry : Bench) (cli : CliConfig) : Bool :=
-  match cli.filter with
+@[inline] def matchesSuite (benchSuite : Option String) (filterSuite : Option String) : Bool :=
+  match filterSuite with
   | none => true
-  | some pat => containsSubstr entry.name pat
+  | some s => benchSuite == some s
+
+@[inline] def matchesTags (benchTags : List String) (filterTags : Array String) : Bool :=
+  if filterTags.isEmpty then
+    true
+  else
+    filterTags.any (fun t => benchTags.contains t)
+
+@[inline] def shouldKeep (entry : Bench) (cli : CliConfig) : Bool :=
+  let nameOk :=
+    match cli.filter with
+    | none => true
+    | some pat => containsSubstr entry.name pat
+  nameOk &&
+    matchesSuite entry.config.suite cli.filterSuite &&
+    matchesTags entry.config.tags cli.filterTags
+
+@[inline] def collectTags (benches : Array Bench) : Array String := Id.run do
+  let mut set : Std.TreeSet String compare := {}
+  for b in benches do
+    for t in b.config.tags do
+      set := set.insert t
+  return set.toArray
+
+@[inline] def collectSuites (benches : Array Bench) : Array String := Id.run do
+  let mut set : Std.TreeSet String compare := {}
+  for b in benches do
+    match b.config.suite with
+    | none => pure ()
+    | some s => set := set.insert s
+  return set.toArray
 
 @[inline] def runBench (entry : Bench) (cli : CliConfig) : IO BenchResult := do
   let cfg := applyOverrides entry.config cli
@@ -250,14 +284,17 @@ structure BenchResult where
     "}"
   "[" ++ String.intercalate "," items ++ "]"
 
-@[inline] def radarName (benchName : String) (suite : Option String) : String :=
-  match suite with
-  | none => benchName
+@[inline] def radarName (benchName : String) (benchSuite : Option String) (radarSuite : Option String) : String :=
+  match radarSuite with
   | some s => s ++ "//" ++ benchName
+  | none =>
+      match benchSuite with
+      | some s => s ++ "//" ++ benchName
+      | none => benchName
 
-@[inline] def renderRadarLines (results : Array BenchResult) (suite : Option String) : Array String :=
+@[inline] def renderRadarLines (results : Array BenchResult) (radarSuite : Option String) : Array String :=
   results.map fun r =>
-    let name := jsonEscape (radarName r.entry.name suite)
+    let name := jsonEscape (radarName r.entry.name r.entry.config.suite radarSuite)
     "{" ++
       "\"name\":\"" ++ name ++ "\"," ++
       "\"unit\":\"ns\"," ++
@@ -331,10 +368,17 @@ structure BenchResult where
   let mut cfg : CliConfig := {}
   if p.hasFlag "list" then
     cfg := { cfg with listOnly := true }
+  if p.hasFlag "list-tags" then
+    cfg := { cfg with listTags := true }
+  if p.hasFlag "list-suites" then
+    cfg := { cfg with listSuites := true }
   if p.hasFlag "quiet" then
     cfg := { cfg with quiet := true }
   match p.flag? "match" with
   | some f => cfg := { cfg with filter := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "tags" with
+  | some f => cfg := { cfg with filterTags := f.as! (Array String) }
   | none => pure ()
   match p.flag? "samples" with
   | some f => cfg := { cfg with samples? := some (f.as! Nat) }
@@ -346,7 +390,10 @@ structure BenchResult where
   | some f => cfg := { cfg with minTimeMs? := some (f.as! Nat) }
   | none => pure ()
   match p.flag? "suite" with
-  | some f => cfg := { cfg with suite := some (f.as! String) }
+  | some f => cfg := { cfg with filterSuite := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "radar-suite" with
+  | some f => cfg := { cfg with radarSuite := some (f.as! String) }
   | none => pure ()
   match p.flag? "radar-out" with
   | some f => cfg := { cfg with radarOut := some (System.FilePath.mk (f.as! String)) }
@@ -377,9 +424,11 @@ structure BenchResult where
     cfg := { cfg with format := .radar }
   return applySave cfg
 
-@[inline] def suiteFromEnv (cli : CliConfig) : IO (Option String) := do
-  if cli.suite.isSome then
-    pure cli.suite
+@[inline] def radarSuiteFromEnv (cli : CliConfig) : IO (Option String) := do
+  if cli.radarSuite.isSome then
+    pure cli.radarSuite
+  else if let some s ← IO.getEnv "LEANBENCH_RADAR_SUITE" then
+    return some s
   else
     return (← IO.getEnv "LEANBENCH_SUITE")
 
@@ -403,6 +452,16 @@ structure BenchResult where
 @[inline] def runWithConfig (cfg : CliConfig) : IO UInt32 := do
   let benches ← listBenches
   let benches := benches.filter (fun b => shouldKeep b cfg)
+  if cfg.listTags || cfg.listSuites then
+    if cfg.listTags then
+      for t in collectTags benches do
+        IO.println t
+    if cfg.listTags && cfg.listSuites then
+      IO.println ""
+    if cfg.listSuites then
+      for s in collectSuites benches do
+        IO.println s
+    return (0 : UInt32)
   if cfg.listOnly then
     for b in benches do
       IO.println b.name
@@ -437,7 +496,7 @@ structure BenchResult where
       | none => IO.println output
       return (0 : UInt32)
   | .radar =>
-      let suite ← suiteFromEnv cfg
+      let suite ← radarSuiteFromEnv cfg
       let lines := renderRadarLines results suite
       let outPath ← radarOutPath cfg
       writeLines lines outPath
@@ -457,14 +516,18 @@ def leanbenchCmd : Cmd := `[Cli|
   leanbench VIA runLeanbenchCmd; ["0.1.0"] "LeanBench benchmark runner."
   FLAGS:
     list; "List available benchmarks."
+    "list-tags"; "List tags (respects filters)."
+    "list-suites"; "List suites (respects filters)."
     "match" : String; "Only run benchmarks whose name contains this substring."
+    tags : Array String; "Only run benchmarks with any of these tags (comma-separated)."
     samples : Nat; "Override sample count."
     warmup : Nat; "Override warmup count."
     "min-time-ms" : Nat; "Run until total time reaches N ms."
     format : String; "Output format: pretty|full|json|radar."
     json; "Alias for --format json."
     radar; "Alias for --format radar."
-    suite : String; "Prefix radar names with <suite>//."
+    suite : String; "Only run benchmarks in this suite."
+    "radar-suite" : String; "Prefix radar names with <suite>//."
     "radar-out" : String; "Write radar JSONL to file (defaults to RADAR_JSONL)."
     "json-out" : String; "Write JSON output to file."
     compare : String; "Compare against a JSON baseline."

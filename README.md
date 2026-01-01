@@ -30,18 +30,22 @@ lake exe leanbench --samples 20 --warmup 2
 ## CLI
 
 - `--list` list benches
+- `--list-tags` list tags (after filters)
+- `--list-suites` list suites (after filters)
 - `--match <substr>` filter by name substring
+- `--tags <t1,t2,...>` filter by any tag
+- `--suite <name>` filter by suite
 - `--samples <n>` override sample count
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
 - `--format pretty|full|json|radar` (`full` adds median/p95/p99)
 - `--json` alias for `--format json`
 - `--radar` alias for `--format radar`
+- `--radar-suite <name>` prefix radar names with `<name>//` (or set `LEANBENCH_RADAR_SUITE`)
 - `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL
 - `--json-out <path>` write JSON to file
 - `--save <path>` write JSON to file and set format to json
 - `--compare <path>` compare against a JSON baseline
-- `--suite <name>` prefix radar names
 
 ## External commands
 
