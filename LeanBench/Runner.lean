@@ -2,6 +2,8 @@ import Std
 import Lean.Data.Json
 import Cli
 import LeanBench.Bench
+import LeanBench.Json
+import LeanBench.Plan
 
 namespace LeanBench
 
@@ -17,6 +19,7 @@ structure CliConfig where
   listOnly : Bool := false
   listTags : Bool := false
   listSuites : Bool := false
+  planOnly : Bool := false
   filter : Option String := none
   filterSuite : Option String := none
   filterTags : Array String := #[]
@@ -24,6 +27,11 @@ structure CliConfig where
   samples? : Option Nat := none
   warmup? : Option Nat := none
   minTimeMs? : Option Nat := none
+  seed : Nat := 0
+  shuffle : Bool := false
+  partition : Option PartitionSpec := none
+  planOut : Option System.FilePath := none
+  manifestOut : Option System.FilePath := none
   groupBySuite : Bool := false
   radarSuite : Option String := none
   radarOut : Option System.FilePath := none
@@ -296,16 +304,6 @@ structure BenchResult where
 @[inline] def renderPretty (results : Array BenchResult) : String :=
   renderPrettyWithBaseline results none false false
 
-@[inline] def jsonEscape (s : String) : String :=
-  s.foldl (fun acc c =>
-    match c with
-    | '"' => acc ++ "\\\""
-    | '\\' => acc ++ "\\\\"
-    | '\n' => acc ++ "\\n"
-    | '\r' => acc ++ "\\r"
-    | '\t' => acc ++ "\\t"
-    | _ => acc.push c) ""
-
 @[inline] def renderJson (results : Array BenchResult) : String :=
   let items := results.toList.map fun r =>
     let name := jsonEscape r.entry.name
@@ -411,10 +409,14 @@ structure BenchResult where
     cfg := { cfg with listTags := true }
   if p.hasFlag "list-suites" then
     cfg := { cfg with listSuites := true }
+  if p.hasFlag "plan" then
+    cfg := { cfg with planOnly := true }
   if p.hasFlag "all-tags" then
     cfg := { cfg with allTags := true }
   if p.hasFlag "quiet" then
     cfg := { cfg with quiet := true }
+  if p.hasFlag "shuffle" then
+    cfg := { cfg with shuffle := true }
   match p.flag? "match" with
   | some f => cfg := { cfg with filter := some (f.as! String) }
   | none => pure ()
@@ -430,6 +432,15 @@ structure BenchResult where
   match p.flag? "min-time-ms" with
   | some f => cfg := { cfg with minTimeMs? := some (f.as! Nat) }
   | none => pure ()
+  match p.flag? "seed" with
+  | some f => cfg := { cfg with seed := (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "partition" with
+  | some f =>
+      match parsePartitionSpec (f.as! String) with
+      | .ok spec => cfg := { cfg with partition := some spec }
+      | .error err => throw <| IO.userError err
+  | none => pure ()
   match p.flag? "group-by" with
   | some f =>
       let v := (f.as! String).toLower
@@ -440,6 +451,12 @@ structure BenchResult where
   | none => pure ()
   match p.flag? "suite" with
   | some f => cfg := { cfg with filterSuite := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "plan-out" with
+  | some f => cfg := { cfg with planOut := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "manifest-out" with
+  | some f => cfg := { cfg with manifestOut := some (System.FilePath.mk (f.as! String)) }
   | none => pure ()
   match p.flag? "radar-suite" with
   | some f => cfg := { cfg with radarSuite := some (f.as! String) }
@@ -498,10 +515,27 @@ structure BenchResult where
   | none => IO.println content
   | some path => appendFile path (content ++ "\n")
 
+@[inline] def writeOutput (content : String) (path? : Option System.FilePath) : IO Unit := do
+  match path? with
+  | none => IO.println content
+  | some path => IO.FS.writeFile path content
+
+@[inline] def planCoreOf (benches : Array Bench) (cfg : CliConfig) : PlanCore :=
+  let entries := benches.map fun b =>
+    entryOf b (applyOverrides b.config cfg)
+  { seed := cfg.seed
+    shuffled := cfg.shuffle
+    partition := cfg.partition
+    entries := entries }
+
 @[inline] def runWithConfig (cfg : CliConfig) : IO UInt32 := do
   let benches ← listBenches
   let suitePred? ← resolveSuiteFilter cfg.filterSuite
   let benches := benches.filter (fun b => shouldKeep b cfg suitePred?)
+  let benches := if cfg.shuffle then shuffleBenches benches cfg.seed else benches
+  let benches := match cfg.partition with
+    | none => benches
+    | some p => partitionBenches benches p
   if cfg.listTags || cfg.listSuites then
     let suites ← listSuites
     if cfg.listTags then
@@ -514,12 +548,33 @@ structure BenchResult where
         IO.println s
     return (0 : UInt32)
   if cfg.listOnly then
-    for b in benches do
-      IO.println b.name
+    if cfg.format == .json then
+      let entries := benches.map fun b => entryOf b (applyOverrides b.config cfg)
+      let output := renderBenchListJson entries
+      writeOutput output cfg.jsonOut
+    else
+      for b in benches do
+        IO.println b.name
+    return (0 : UInt32)
+  if cfg.planOnly then
+    let core := planCoreOf benches cfg
+    let coreJson := renderPlanCoreJson core
+    let planHash := hashStringHex coreJson
+    let manifest ← buildManifest planHash benches.size cfg.partition
+    let planJson := renderPlanJson core manifest
+    writeOutput planJson cfg.planOut
+    if let some path := cfg.manifestOut then
+      writeOutput (renderManifestJson manifest) (some path)
     return (0 : UInt32)
   if benches.size == 0 then
     IO.eprintln "no benchmarks registered"
     return (1 : UInt32)
+  if let some path := cfg.manifestOut then
+    let core := planCoreOf benches cfg
+    let coreJson := renderPlanCoreJson core
+    let planHash := hashStringHex coreJson
+    let manifest ← buildManifest planHash benches.size cfg.partition
+    writeOutput (renderManifestJson manifest) (some path)
   let mut results : Array BenchResult := #[]
   for b in benches do
     unless cfg.quiet do
@@ -569,12 +624,18 @@ def leanbenchCmd : Cmd := `[Cli|
     list; "List available benchmarks."
     "list-tags"; "List tags (respects filters)."
     "list-suites"; "List suites (respects filters)."
+    plan; "Print a deterministic run plan as JSON and exit."
     "match" : String; "Only run benchmarks whose name contains this substring."
     tags : Array String; "Only run benchmarks with any of these tags (comma-separated)."
     "all-tags"; "Require all tags listed in --tags."
     samples : Nat; "Override sample count."
     warmup : Nat; "Override warmup count."
     "min-time-ms" : Nat; "Run until total time reaches N ms."
+    seed : Nat; "Seed for deterministic shuffling."
+    shuffle; "Shuffle benchmark order deterministically (use --seed)."
+    partition : String; "Partition benches: count:m/n or hash:m/n."
+    "plan-out" : String; "Write plan JSON to file."
+    "manifest-out" : String; "Write run manifest JSON to file."
     "group-by" : String; "Group output by: suite."
     format : String; "Output format: pretty|full|json|radar."
     json; "Alias for --format json."

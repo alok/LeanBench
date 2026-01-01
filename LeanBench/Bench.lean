@@ -15,6 +15,7 @@ structure Bench where
   name : String
   action : IO Unit
   config : BenchConfig := {}
+  deriving Inhabited
 
 initialize benchRegistry : IO.Ref (Array Bench) <- IO.mkRef #[]
 

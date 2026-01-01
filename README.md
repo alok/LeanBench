@@ -30,8 +30,10 @@ lake exe leanbench --samples 20 --warmup 2
 ## CLI
 
 - `--list` list benches
+- `--list --format json` machine-readable bench list
 - `--list-tags` list tags (after filters)
 - `--list-suites` list suites (after filters)
+- `--plan` emit deterministic plan JSON and exit
 - `--match <substr>` filter by name substring
 - `--tags <t1,t2,...>` filter by any tag
 - `--all-tags` require all tags in `--tags`
@@ -39,6 +41,11 @@ lake exe leanbench --samples 20 --warmup 2
 - `--samples <n>` override sample count
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
+- `--seed <n>` seed for deterministic shuffling
+- `--shuffle` shuffle bench order deterministically
+- `--partition count:m/n|hash:m/n` shard benches across workers
+- `--plan-out <path>` write plan JSON to file
+- `--manifest-out <path>` write run manifest JSON to file
 - `--group-by suite` group pretty output by suite
 - `--format pretty|full|json|radar` (`full` adds median/p95/p99)
 - `--json` alias for `--format json`
