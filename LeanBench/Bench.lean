@@ -24,6 +24,47 @@ initialize benchRegistry : IO.Ref (Array Bench) <- IO.mkRef #[]
 @[inline] def listBenches : IO (Array Bench) :=
   benchRegistry.get
 
+structure SuiteConfig where
+  description : String := ""
+  tags : List String := []
+  benches : List String := []
+  excludeTags : List String := []
+  excludeBenches : List String := []
+  deriving Inhabited
+
+structure Suite where
+  name : String
+  description : String := ""
+  filter : Bench → Bool
+
+initialize suiteRegistry : IO.Ref (Array Suite) <- IO.mkRef #[]
+
+@[inline] def registerSuite (suite : Suite) : IO Unit :=
+  suiteRegistry.modify (·.push suite)
+
+@[inline] def listSuites : IO (Array Suite) :=
+  suiteRegistry.get
+
+@[inline] def findSuite? (name : String) : IO (Option Suite) := do
+  return (← listSuites).find? (·.name == name)
+
+@[inline] def suiteFromConfig (name : String) (cfg : SuiteConfig) : Suite :=
+  let nameMatch (bench : Bench) : Bool :=
+    if cfg.benches.isEmpty then true else cfg.benches.contains bench.name
+  let tagMatch (bench : Bench) : Bool :=
+    if cfg.tags.isEmpty then true else cfg.tags.any (bench.config.tags.contains ·)
+  let suiteMatch (bench : Bench) : Bool :=
+    if cfg.tags.isEmpty && cfg.benches.isEmpty then
+      bench.config.suite == some name
+    else
+      true
+  let excluded (bench : Bench) : Bool :=
+    cfg.excludeBenches.contains bench.name ||
+      cfg.excludeTags.any (bench.config.tags.contains ·)
+  let filter (bench : Bench) : Bool :=
+    suiteMatch bench && nameMatch bench && tagMatch bench && !excluded bench
+  { name := name, description := cfg.description, filter := filter }
+
 /--
 Register a benchmark that runs an external command. Stdout/stderr are suppressed.
 Throws if the command exits non-zero.
@@ -44,3 +85,11 @@ macro "bench " name:str " do " seq:doSeq : command =>
 macro "bench " name:str " (" cfg:term ")" " do " seq:doSeq : command =>
   `(initialize (LeanBench.register
     { name := $name, action := (do $seq), config := $cfg }))
+
+macro "bench_suite " name:str : command =>
+  `(initialize (LeanBench.registerSuite
+    (LeanBench.suiteFromConfig $name {})))
+
+macro "bench_suite " name:str " (" cfg:term ")" : command =>
+  `(initialize (LeanBench.registerSuite
+    (LeanBench.suiteFromConfig $name $cfg)))

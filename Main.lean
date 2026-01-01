@@ -1,5 +1,6 @@
 import LeanBench.Runner
 import LeanBench.Demo
+import LeanBench.Suites
 
 open LeanBench
 

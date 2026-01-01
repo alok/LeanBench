@@ -1,6 +1,7 @@
 name = "LeanBench"
 version = "0.1.0"
 defaultTargets = ["leanbench"]
+benchDriver = "leanbench"
 
 [[require]]
 name = "Cli"

@@ -4,8 +4,8 @@ import LeanBench
 
 open LeanBench
 
-def mkCfg (suite : String) (tags : List String := []) : BenchConfig :=
-  { suite := some suite, tags := tags }
+def mkCfg (suiteName : String) (tags : List String := []) : BenchConfig :=
+  { suite := some suiteName, tags := tags }
 
 bench "sum" (mkCfg "core" ["core", "arith"]) do
   let mut acc := 0
