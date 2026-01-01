@@ -8,6 +8,7 @@ structure BenchConfig where
   warmup : Nat := 2
   samples : Nat := 20
   minTimeMs : Nat := 0
+  threads : Nat := 1
   suite : Option String := none
   tags : List String := []
   bytes : Option Nat := none

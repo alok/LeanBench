@@ -66,6 +66,7 @@ benchDriver = "LeanBench/leanbench"
 - `--samples <n>` override sample count
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
+- `--threads <n>` run each sample with N parallel action tasks
 - `--seed <n>` seed for deterministic shuffling
 - `--shuffle` shuffle bench order deterministically
 - `--partition count:m/n|hash:m/n` shard benches across workers
@@ -104,6 +105,7 @@ bandwidth (GB/s) and throughput (GFLOP/s) in pretty/JSON output:
 import LeanBench
 
 def cfg : BenchConfig := {
+  threads := 8                -- run in parallel
   bytes := some (3 * 1_000_000 * 4)  -- bytes per iteration
   flops := some 1_000_000           -- flops per iteration
 }

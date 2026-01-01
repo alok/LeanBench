@@ -27,6 +27,7 @@ structure CliConfig where
   samples? : Option Nat := none
   warmup? : Option Nat := none
   minTimeMs? : Option Nat := none
+  threads? : Option Nat := none
   seed : Nat := 0
   shuffle : Bool := false
   partition : Option PartitionSpec := none
@@ -130,6 +131,7 @@ structure BenchResult where
     warmup := cli.warmup?.getD cfg.warmup
     samples := cli.samples?.getD cfg.samples
     minTimeMs := cli.minTimeMs?.getD cfg.minTimeMs
+    threads := cli.threads?.getD cfg.threads
   }
 
 @[inline] def containsSubstr (s pat : String) : Bool :=
@@ -194,16 +196,32 @@ structure BenchResult where
         set := set.insert s.name
   return set.toArray
 
+@[inline] def effectiveThreads (cfg : BenchConfig) : Nat :=
+  if cfg.threads == 0 then 1 else cfg.threads
+
+@[inline] def scaledUnits (cfg : BenchConfig) (units : Nat) : Nat :=
+  units * effectiveThreads cfg
+
 @[inline] def runBench (entry : Bench) (cli : CliConfig) : IO BenchResult := do
   let cfg := applyOverrides entry.config cli
+  let threads := effectiveThreads cfg
+  let runOnce : IO Unit := do
+    if threads <= 1 then
+      entry.action
+    else
+      let mut tasks := Array.mkEmpty threads
+      for _ in [:threads] do
+        tasks := tasks.push (← IO.asTask (prio := .dedicated) entry.action)
+      for t in tasks do
+        let _ ← IO.wait t
   for _ in [0:cfg.warmup] do
-    entry.action
+    runOnce
   let minTimeNs := cfg.minTimeMs * nsPerMs
   let mut samples : Array Nat := #[]
   let mut total : Nat := 0
   while samples.size < cfg.samples || (minTimeNs > 0 && total < minTimeNs) do
     let start ← IO.monoNanosNow
-    entry.action
+    runOnce
     let stop ← IO.monoNanosNow
     let elapsed := stop - start
     samples := samples.push elapsed
@@ -233,13 +251,13 @@ structure BenchResult where
   rateFromNs units meanNs * (Float.ofNat nsPerS)
 
 @[inline] def bandwidthGbps? (r : BenchResult) : Option Float :=
-  r.entry.config.bytes.map (fun bytes => ratePerSec bytes r.stats.meanNs / 1.0e9)
+  r.config.bytes.map (fun bytes => ratePerSec (scaledUnits r.config bytes) r.stats.meanNs / 1.0e9)
 
 @[inline] def throughputGflops? (r : BenchResult) : Option Float :=
-  r.entry.config.flops.map (fun flops => ratePerSec flops r.stats.meanNs / 1.0e9)
+  r.config.flops.map (fun flops => ratePerSec (scaledUnits r.config flops) r.stats.meanNs / 1.0e9)
 
 @[inline] def itemsPerSec? (r : BenchResult) : Option Float :=
-  r.entry.config.items.map (fun items => ratePerSec items r.stats.meanNs)
+  r.config.items.map (fun items => ratePerSec (scaledUnits r.config items) r.stats.meanNs)
 
 @[inline] def baselineFor (baseline? : Option (Std.HashMap String Float)) (name : String) : Option Float :=
   match baseline? with
@@ -492,6 +510,9 @@ structure BenchResult where
   match p.flag? "min-time-ms" with
   | some f => cfg := { cfg with minTimeMs? := some (f.as! Nat) }
   | none => pure ()
+  match p.flag? "threads" with
+  | some f => cfg := { cfg with threads? := some (f.as! Nat) }
+  | none => pure ()
   match p.flag? "seed" with
   | some f => cfg := { cfg with seed := (f.as! Nat) }
   | none => pure ()
@@ -691,6 +712,7 @@ def leanbenchCmd : Cmd := `[Cli|
     samples : Nat; "Override sample count."
     warmup : Nat; "Override warmup count."
     "min-time-ms" : Nat; "Run until total time reaches N ms."
+    threads : Nat; "Run each sample with N parallel action tasks."
     seed : Nat; "Seed for deterministic shuffling."
     shuffle; "Shuffle benchmark order deterministically (use --seed)."
     partition : String; "Partition benches: count:m/n or hash:m/n."

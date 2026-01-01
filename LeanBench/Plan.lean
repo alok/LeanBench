@@ -165,6 +165,7 @@ structure Lcg where
     "\"warmup\":" ++ toString cfg.warmup ++ "," ++
     "\"samples\":" ++ toString cfg.samples ++ "," ++
     "\"min_time_ms\":" ++ toString cfg.minTimeMs ++ "," ++
+    "\"threads\":" ++ toString cfg.threads ++ "," ++
     "\"bytes\":" ++ bytes ++ "," ++
     "\"flops\":" ++ flops ++ "," ++
     "\"items\":" ++ items ++
