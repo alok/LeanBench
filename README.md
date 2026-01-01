@@ -16,7 +16,7 @@ bench "sum" do
   if acc == 0 then
     IO.println ""
 
-def main (args : List String) : IO Unit :=
+def main (args : List String) : IO UInt32 :=
   LeanBench.runMain args
 ```
 
@@ -24,7 +24,7 @@ Build and run:
 
 ```sh
 lake build
-lake exe leanbench -- --samples 20 --warmup 2
+lake exe leanbench --samples 20 --warmup 2
 ```
 
 ## CLI
@@ -35,8 +35,11 @@ lake exe leanbench -- --samples 20 --warmup 2
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
 - `--format pretty|full|json|radar` (`full` adds median/p95/p99)
+- `--json` alias for `--format json`
+- `--radar` alias for `--format radar`
 - `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL
 - `--json-out <path>` write JSON to file
+- `--save <path>` write JSON to file and set format to json
 - `--compare <path>` compare against a JSON baseline
 - `--suite <name>` prefix radar names
 
@@ -53,8 +56,8 @@ bench "lean --version" do
 
 ```sh
 # create baseline
-lake exe leanbench -- --format json --json-out baseline.json
+lake exe leanbench --save baseline.json
 
 # compare current run to baseline
-lake exe leanbench -- --compare baseline.json
+lake exe leanbench --compare baseline.json
 ```

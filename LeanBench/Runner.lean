@@ -1,5 +1,6 @@
 import Std
 import Lean.Data.Json
+import Cli
 import LeanBench.Bench
 
 namespace LeanBench
@@ -22,8 +23,8 @@ structure CliConfig where
   radarOut : Option System.FilePath := none
   jsonOut : Option System.FilePath := none
   comparePath : Option System.FilePath := none
+  savePath : Option System.FilePath := none
   quiet : Bool := false
-  showHelp : Bool := false
 
 structure BenchStats where
   meanNs : Float
@@ -263,30 +264,6 @@ structure BenchResult where
       "\"value\":" ++ r.stats.meanNs.toString ++
     "}"
 
-@[inline] def usage : String :=
-  String.intercalate "\n" [
-    "LeanBench: simple benchmarking runner for Lean",
-    "",
-    "Usage:",
-    "  leanbench [options]",
-    "",
-    "Options:",
-    "  --list                 List available benchmarks",
-    "  --match <substr>       Only run benchmarks whose name contains <substr>",
-    "  --samples <n>           Override sample count",
-    "  --warmup <n>            Override warmup count",
-    "  --min-time-ms <n>       Run until total time reaches <n> ms",
-    "  --format <pretty|full|json|radar>",
-    "  --json                 Alias for --format json",
-    "  --radar                Alias for --format radar",
-    "  --suite <name>          Prefix radar names with <name>//...",
-    "  --radar-out <path>      Write radar JSONL to file (defaults to RADAR_JSONL env)",
-    "  --json-out <path>       Write JSON output to file",
-    "  --compare <path>        Compare results against a JSON baseline",
-    "  --quiet                Suppress per-benchmark progress",
-    "  --help                 Show this help"
-  ]
-
 @[inline] def jsonObjFind? (obj : Std.TreeMap.Raw String Lean.Json) (key : String) : Option Lean.Json :=
   obj.get? key
 
@@ -334,53 +311,71 @@ structure BenchResult where
           return map
       | _ => throw <| IO.userError "baseline JSON must be an array"
 
-@[inline] def parseNat (s : String) : IO Nat :=
-  match s.toNat? with
-  | some n => pure n
-  | none => throw <| IO.userError s!"invalid Nat: {s}"
+@[inline] def parseFormat (s : String) : Option OutputFormat :=
+  if s == "pretty" then some .pretty
+  else if s == "full" || s == "pretty-full" then some .prettyFull
+  else if s == "json" then some .json
+  else if s == "radar" then some .radar
+  else none
 
-@[inline] def parseArgs (args : List String) : IO CliConfig :=
-  let rec loop (cfg : CliConfig) (args : List String) : IO CliConfig :=
-    match args with
-    | [] => pure cfg
-    | "--help" :: rest => loop { cfg with showHelp := true } rest
-    | "--list" :: rest => loop { cfg with listOnly := true } rest
-    | "--json" :: rest => loop { cfg with format := .json } rest
-    | "--radar" :: rest => loop { cfg with format := .radar } rest
-    | "--quiet" :: rest => loop { cfg with quiet := true } rest
-    | "--format" :: fmt :: rest => do
-        let fmt := fmt.toLower
-        let out :=
-          if fmt == "pretty" then .pretty
-          else if fmt == "full" || fmt == "pretty-full" then .prettyFull
-          else if fmt == "json" then .json
-          else if fmt == "radar" then .radar
-          else cfg.format
-        let known :=
-          if fmt == "pretty" then true
-          else if fmt == "full" || fmt == "pretty-full" then true
-          else if fmt == "json" then true
-          else if fmt == "radar" then true
-          else false
-        if out == cfg.format && !known then
-          throw <| IO.userError s!"unknown format: {fmt}"
-        loop { cfg with format := out } rest
-    | "--match" :: pat :: rest => loop { cfg with filter := some pat } rest
-    | "--samples" :: n :: rest => do
-        let n ← parseNat n
-        loop { cfg with samples? := some n } rest
-    | "--warmup" :: n :: rest => do
-        let n ← parseNat n
-        loop { cfg with warmup? := some n } rest
-    | "--min-time-ms" :: n :: rest => do
-        let n ← parseNat n
-        loop { cfg with minTimeMs? := some n } rest
-    | "--suite" :: s :: rest => loop { cfg with suite := some s } rest
-    | "--radar-out" :: p :: rest => loop { cfg with radarOut := some (System.FilePath.mk p) } rest
-    | "--json-out" :: p :: rest => loop { cfg with jsonOut := some (System.FilePath.mk p) } rest
-    | "--compare" :: p :: rest => loop { cfg with comparePath := some (System.FilePath.mk p) } rest
-    | flag :: _ => throw <| IO.userError s!"unknown argument: {flag}"
-  loop {} args
+@[inline] def applySave (cfg : CliConfig) : CliConfig :=
+  match cfg.savePath with
+  | none => cfg
+  | some path =>
+      let jsonOut := match cfg.jsonOut with
+        | some _ => cfg.jsonOut
+        | none => some path
+      { cfg with format := .json, jsonOut := jsonOut }
+
+@[inline] def configFromParsed (p : Cli.Parsed) : IO CliConfig := do
+  let mut cfg : CliConfig := {}
+  if p.hasFlag "list" then
+    cfg := { cfg with listOnly := true }
+  if p.hasFlag "quiet" then
+    cfg := { cfg with quiet := true }
+  match p.flag? "match" with
+  | some f => cfg := { cfg with filter := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "samples" with
+  | some f => cfg := { cfg with samples? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "warmup" with
+  | some f => cfg := { cfg with warmup? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "min-time-ms" with
+  | some f => cfg := { cfg with minTimeMs? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "suite" with
+  | some f => cfg := { cfg with suite := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "radar-out" with
+  | some f => cfg := { cfg with radarOut := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "json-out" with
+  | some f => cfg := { cfg with jsonOut := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "compare" with
+  | some f => cfg := { cfg with comparePath := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "save" with
+  | some f => cfg := { cfg with savePath := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "format" with
+  | some f =>
+      let fmt := (f.as! String).toLower
+      match parseFormat fmt with
+      | some out => cfg := { cfg with format := out }
+      | none => throw <| IO.userError s!"unknown format: {fmt}"
+  | none => pure ()
+  let json := p.hasFlag "json"
+  let radar := p.hasFlag "radar"
+  if json && radar then
+    throw <| IO.userError "cannot use --json and --radar together"
+  else if json then
+    cfg := { cfg with format := .json }
+  else if radar then
+    cfg := { cfg with format := .radar }
+  return applySave cfg
 
 @[inline] def suiteFromEnv (cli : CliConfig) : IO (Option String) := do
   if cli.suite.isSome then
@@ -405,20 +400,16 @@ structure BenchResult where
   | none => IO.println content
   | some path => appendFile path (content ++ "\n")
 
-@[inline] def runMain (args : List String) : IO Unit := do
-  let cfg ← parseArgs args
-  if cfg.showHelp then
-    IO.println usage
-    return
+@[inline] def runWithConfig (cfg : CliConfig) : IO UInt32 := do
   let benches ← listBenches
   let benches := benches.filter (fun b => shouldKeep b cfg)
   if cfg.listOnly then
     for b in benches do
       IO.println b.name
-    return
+    return (0 : UInt32)
   if benches.size == 0 then
     IO.eprintln "no benchmarks registered"
-    return
+    return (1 : UInt32)
   let mut results : Array BenchResult := #[]
   for b in benches do
     unless cfg.quiet do
@@ -434,18 +425,54 @@ structure BenchResult where
   | .pretty =>
       let output := renderPrettyWithBaseline results baseline? false
       IO.println output
+      return (0 : UInt32)
   | .prettyFull =>
       let output := renderPrettyWithBaseline results baseline? true
       IO.println output
+      return (0 : UInt32)
   | .json =>
       let output := renderJson results
       match cfg.jsonOut with
       | some path => IO.FS.writeFile path output
       | none => IO.println output
+      return (0 : UInt32)
   | .radar =>
       let suite ← suiteFromEnv cfg
       let lines := renderRadarLines results suite
       let outPath ← radarOutPath cfg
       writeLines lines outPath
+      return (0 : UInt32)
+
+@[inline] def runLeanbenchCmd (p : Cli.Parsed) : IO UInt32 := do
+  try
+    let cfg ← configFromParsed p
+    runWithConfig cfg
+  catch e =>
+    IO.eprintln s!"{e}"
+    return (1 : UInt32)
+
+open Cli
+
+def leanbenchCmd : Cmd := `[Cli|
+  leanbench VIA runLeanbenchCmd; ["0.1.0"] "LeanBench benchmark runner."
+  FLAGS:
+    list; "List available benchmarks."
+    "match" : String; "Only run benchmarks whose name contains this substring."
+    samples : Nat; "Override sample count."
+    warmup : Nat; "Override warmup count."
+    "min-time-ms" : Nat; "Run until total time reaches N ms."
+    format : String; "Output format: pretty|full|json|radar."
+    json; "Alias for --format json."
+    radar; "Alias for --format radar."
+    suite : String; "Prefix radar names with <suite>//."
+    "radar-out" : String; "Write radar JSONL to file (defaults to RADAR_JSONL)."
+    "json-out" : String; "Write JSON output to file."
+    compare : String; "Compare against a JSON baseline."
+    save : String; "Write JSON output to file and set format=json."
+    quiet; "Suppress per-benchmark progress."
+]
+
+@[inline] def runMain (args : List String) : IO UInt32 :=
+  leanbenchCmd.validate args
 
 end LeanBench

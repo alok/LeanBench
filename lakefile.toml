@@ -2,6 +2,11 @@ name = "LeanBench"
 version = "0.1.0"
 defaultTargets = ["leanbench"]
 
+[[require]]
+name = "Cli"
+git = "https://github.com/leanprover/lean4-cli"
+rev = "main"
+
 [[lean_lib]]
 name = "LeanBench"
 
