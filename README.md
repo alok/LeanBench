@@ -27,6 +27,31 @@ lake build
 lake exe leanbench --samples 20 --warmup 2
 ```
 
+## Install
+
+Add LeanBench as a Lake dependency:
+
+```toml
+[[require]]
+name = "LeanBench"
+git = "https://github.com/alok/LeanBench"
+rev = "main"
+```
+
+For local development, you can use a path dependency instead:
+
+```toml
+[[require]]
+name = "LeanBench"
+path = "../LeanBench"
+```
+
+Then set the bench driver (optional, enables `lake bench`):
+
+```toml
+benchDriver = "LeanBench/leanbench"
+```
+
 ## CLI
 
 - `--list` list benches
@@ -103,3 +128,7 @@ lake exe leanbench --save baseline.json
 # compare current run to baseline
 lake exe leanbench --compare baseline.json
 ```
+
+## License
+
+Apache-2.0
