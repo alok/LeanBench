@@ -221,6 +221,15 @@ structure BenchResult where
 @[inline] def formatSigned (x : Float) : String :=
   if x < 0.0 then formatFloat3 x else "+" ++ formatFloat3 x
 
+@[inline] def rateFromNs (units : Nat) (meanNs : Float) : Float :=
+  if meanNs <= 0.0 then 0.0 else units.toFloat / meanNs
+
+@[inline] def bandwidthGbps? (r : BenchResult) : Option Float :=
+  r.entry.config.bytes.map (fun bytes => rateFromNs bytes r.stats.meanNs)
+
+@[inline] def throughputGflops? (r : BenchResult) : Option Float :=
+  r.entry.config.flops.map (fun flops => rateFromNs flops r.stats.meanNs)
+
 @[inline] def baselineFor (baseline? : Option (Std.HashMap String Float)) (name : String) : Option Float :=
   match baseline? with
   | none => none
@@ -228,13 +237,18 @@ structure BenchResult where
 
 @[inline] def renderPrettyTable (results : Array BenchResult)
     (baseline? : Option (Std.HashMap String Float)) (full : Bool) : String := Id.run do
+  let hasBytes := results.any (fun r => r.entry.config.bytes.isSome)
+  let hasFlops := results.any (fun r => r.entry.config.flops.isSome)
   let baseHeader := #["benchmark", "mean", "min", "max", "stddev", "samples"]
   let extraHeader := if full then #["median", "p95", "p99"] else #[]
+  let metricHeader :=
+    (if hasBytes then #["GB/s"] else #[]) ++
+    (if hasFlops then #["GFLOP/s"] else #[])
   let compareHeader :=
     match baseline? with
     | none => #[]
     | some _ => #["baseline", "ratio", "delta"]
-  let header := baseHeader ++ extraHeader ++ compareHeader
+  let header := baseHeader ++ extraHeader ++ metricHeader ++ compareHeader
   let rows := results.map fun r =>
     let baseCols := #[r.entry.name,
       formatNsFloat r.stats.meanNs,
@@ -249,6 +263,17 @@ structure BenchResult where
           formatNs r.stats.p99Ns]
       else
         #[]
+    let metricCols :=
+      (if hasBytes then
+        #[match bandwidthGbps? r with
+          | some v => formatFloat3 v
+          | none => "-"]
+      else #[]) ++
+      (if hasFlops then
+        #[match throughputGflops? r with
+          | some v => formatFloat3 v
+          | none => "-"]
+      else #[])
     let compareCols :=
       match baselineFor baseline? r.entry.name with
       | none => #[]
@@ -259,7 +284,7 @@ structure BenchResult where
             let ratio := r.stats.meanNs / base
             let delta := (r.stats.meanNs - base) / base * 100.0
             #[formatNsFloat base, formatFloat3 ratio ++ "x", formatSigned delta ++ "%"]
-    baseCols ++ extraCols ++ compareCols
+    baseCols ++ extraCols ++ metricCols ++ compareCols
   let mut widths := header.map String.length
   for row in rows do
     for i in [:row.size] do
@@ -307,18 +332,27 @@ structure BenchResult where
 @[inline] def renderJson (results : Array BenchResult) : String :=
   let items := results.toList.map fun r =>
     let name := jsonEscape r.entry.name
-    "{" ++
-      "\"name\":\"" ++ name ++ "\"," ++
-      "\"mean_ns\":" ++ r.stats.meanNs.toString ++ "," ++
-      "\"stddev_ns\":" ++ r.stats.stddevNs.toString ++ "," ++
-      "\"min_ns\":" ++ toString r.stats.minNs ++ "," ++
-      "\"max_ns\":" ++ toString r.stats.maxNs ++ "," ++
-      "\"median_ns\":" ++ toString r.stats.medianNs ++ "," ++
-      "\"p95_ns\":" ++ toString r.stats.p95Ns ++ "," ++
-      "\"p99_ns\":" ++ toString r.stats.p99Ns ++ "," ++
-      "\"samples\":" ++ toString r.stats.samples ++ "," ++
-      "\"total_ns\":" ++ toString r.stats.totalNs ++
-    "}"
+    let bandwidth := match bandwidthGbps? r with
+      | some v => formatFloat3 v
+      | none => "null"
+    let gflops := match throughputGflops? r with
+      | some v => formatFloat3 v
+      | none => "null"
+    let fields := #[
+      "\"name\":\"" ++ name ++ "\"",
+      "\"mean_ns\":" ++ r.stats.meanNs.toString,
+      "\"stddev_ns\":" ++ r.stats.stddevNs.toString,
+      "\"min_ns\":" ++ toString r.stats.minNs,
+      "\"max_ns\":" ++ toString r.stats.maxNs,
+      "\"median_ns\":" ++ toString r.stats.medianNs,
+      "\"p95_ns\":" ++ toString r.stats.p95Ns,
+      "\"p99_ns\":" ++ toString r.stats.p99Ns,
+      "\"samples\":" ++ toString r.stats.samples,
+      "\"total_ns\":" ++ toString r.stats.totalNs,
+      "\"bandwidth_gbps\":" ++ bandwidth,
+      "\"throughput_gflops\":" ++ gflops
+    ]
+    "{" ++ String.intercalate "," fields.toList ++ "}"
   "[" ++ String.intercalate "," items ++ "]"
 
 @[inline] def radarName (benchName : String) (benchSuite : Option String) (radarSuite : Option String) : String :=

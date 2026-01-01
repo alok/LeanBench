@@ -95,6 +95,24 @@ bench_suite "text" ({
 })
 ```
 
+## GPU metrics
+
+Provide per-iteration byte and flop counts in `BenchConfig` to emit
+bandwidth (GB/s) and throughput (GFLOP/s) in pretty/JSON output:
+
+```lean
+import LeanBench
+
+def cfg : BenchConfig := {
+  bytes := some (3 * 1_000_000 * 4)  -- read 2 + write 1 float arrays
+  flops := some 1_000_000           -- one add per element
+}
+
+bench "vector_add" (cfg) do
+  -- run kernel
+  pure ()
+```
+
 ## Lake integration
 
 Lake already supports `bench` drivers (like `test`). Configure your package to

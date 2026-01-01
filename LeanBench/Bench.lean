@@ -9,6 +9,8 @@ structure BenchConfig where
   minTimeMs : Nat := 0
   suite : Option String := none
   tags : List String := []
+  bytes : Option Nat := none
+  flops : Option Nat := none
   deriving Inhabited
 
 structure Bench where

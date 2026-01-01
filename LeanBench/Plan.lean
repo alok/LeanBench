@@ -158,10 +158,14 @@ structure Lcg where
   return arr
 
 @[inline] def renderBenchConfigJson (cfg : BenchConfig) : String :=
+  let bytes := match cfg.bytes with | none => "null" | some v => toString v
+  let flops := match cfg.flops with | none => "null" | some v => toString v
   "{" ++
     "\"warmup\":" ++ toString cfg.warmup ++ "," ++
     "\"samples\":" ++ toString cfg.samples ++ "," ++
-    "\"min_time_ms\":" ++ toString cfg.minTimeMs ++
+    "\"min_time_ms\":" ++ toString cfg.minTimeMs ++ "," ++
+    "\"bytes\":" ++ bytes ++ "," ++
+    "\"flops\":" ++ flops ++
   "}"
 
 @[inline] def renderTagsJson (tags : List String) : String :=
