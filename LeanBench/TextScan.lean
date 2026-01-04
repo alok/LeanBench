@@ -165,11 +165,27 @@ def nolintNeedle : List Char := "nolint".toList
 def blockStartNeedle : List Char := "/-".toList
 def blockEndNeedle : List Char := "-/".toList
 
-def readSuffixes : List String := [".get", ".get!", ".getD", ".get?", ".read", ".read?"]
-def writeSuffixes : List String := [".set", ".set!", ".modify", ".write", ".write?"]
-def allocSuffixes : List String := [".mkRef", ".mkArray", ".mkEmpty", ".empty", ".singleton", ".push"]
-def freeSuffixes : List String :=
-  [".clear", ".erase", ".eraseD", ".pop", ".pop?", ".reset", ".shrink", ".release", ".dispose"]
+def suffixesFromNames (names : List Name) : List String :=
+  names.map (fun name => s!".{name.toString}")
+
+def readSuffixNames : List Name :=
+  [Name.mkSimple "get", Name.mkSimple "get!", Name.mkSimple "getD",
+   Name.mkSimple "get?", Name.mkSimple "read", Name.mkSimple "read?"]
+def writeSuffixNames : List Name :=
+  [Name.mkSimple "set", Name.mkSimple "set!", Name.mkSimple "modify",
+   Name.mkSimple "write", Name.mkSimple "write?"]
+def allocSuffixNames : List Name :=
+  [Name.mkSimple "mkRef", Name.mkSimple "mkArray", Name.mkSimple "mkEmpty",
+   Name.mkSimple "empty", Name.mkSimple "singleton", Name.mkSimple "push"]
+def freeSuffixNames : List Name :=
+  [Name.mkSimple "clear", Name.mkSimple "erase", Name.mkSimple "eraseD",
+   Name.mkSimple "pop", Name.mkSimple "pop?", Name.mkSimple "reset",
+   Name.mkSimple "shrink", Name.mkSimple "release", Name.mkSimple "dispose"]
+
+def readSuffixes : List String := suffixesFromNames readSuffixNames
+def writeSuffixes : List String := suffixesFromNames writeSuffixNames
+def allocSuffixes : List String := suffixesFromNames allocSuffixNames
+def freeSuffixes : List String := suffixesFromNames freeSuffixNames
 
 @[inline] def isDefLine (trimmed : String) : Bool :=
   defLinePrefixes.any (fun k => trimmed.startsWith s!"{k} ")
