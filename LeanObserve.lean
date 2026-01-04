@@ -1,5 +1,6 @@
 import Cli
 import Lean
+import Std
 
 open Cli
 open Lean
@@ -151,43 +152,76 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
     , ("nolint", num m.nolint)
     ]
 
-@[inline] def fileNodeJson (path : System.FilePath) (m : FileMetrics) : Json :=
-  let pathStr := path.toString
-  let name := path.fileName.getD pathStr
+structure NodeAcc where
+  name : String
+  path : System.FilePath
+  isFile : Bool := false
+  metrics : FileMetrics := {}
+  children : List NodeAcc := []
+
+@[inline] def emptyNode (name : String) (path : System.FilePath) : NodeAcc :=
+  { name := name, path := path }
+
+@[inline] def dropPrefix (pre xs : List String) : List String :=
+  match pre, xs with
+  | [], xs => xs
+  | _, [] => []
+  | p :: ps, x :: xs =>
+      if p == x then dropPrefix ps xs else x :: xs
+
+@[inline] def relativeComponents (root path : System.FilePath) : List String :=
+  dropPrefix root.components path.components
+
+partial def upsertChild (children : List NodeAcc) (name : String) (path : System.FilePath)
+    (f : NodeAcc → NodeAcc) : List NodeAcc :=
+  match children with
+  | [] => [f (emptyNode name path)]
+  | c :: cs =>
+      if c.name == name then
+        f c :: cs
+      else
+        c :: upsertChild cs name path f
+
+partial def insertNode (node : NodeAcc) (basePath : System.FilePath) (components : List String)
+    (filePath : System.FilePath) (m : FileMetrics) : NodeAcc :=
+  let node := { node with metrics := node.metrics.add m }
+  match components with
+  | [] =>
+      { node with isFile := true, path := filePath }
+  | c :: cs =>
+      let childPath := basePath / c
+      let children := upsertChild node.children c childPath (fun child => insertNode child childPath cs filePath m)
+      { node with children := children }
+
+@[inline] def tagsJson (isFile : Bool) : Json :=
+  if isFile then
+    Json.arr #[Json.str "file"]
+  else
+    Json.arr #[Json.str "dir"]
+
+partial def nodeAccToJson (node : NodeAcc) : Json :=
+  let childrenJson := (node.children.map nodeAccToJson).toArray
+  let pathStr := node.path.toString
   Json.mkObj
     [ ("id", Json.str pathStr)
     , ("kind", Json.str "module")
-    , ("name", Json.str name)
+    , ("name", Json.str node.name)
     , ("path", Json.str pathStr)
     , ("span", Json.mkObj
         [ ("file", Json.str pathStr)
         , ("line", Json.num 1)
         , ("col", Json.num 1)
         ])
-    , ("metrics", metricsJsonFrom m)
-    , ("tags", Json.arr #[])
-    , ("children", Json.arr #[])
-    ]
-
-@[inline] def rootNodeJsonFrom (root : String) (children : Array Json) (m : FileMetrics) : Json :=
-  Json.mkObj
-    [ ("id", Json.str "root")
-    , ("kind", Json.str "module")
-    , ("name", Json.str "root")
-    , ("path", Json.str root)
-    , ("span", Json.mkObj
-        [ ("file", Json.str "")
-        , ("line", Json.num 1)
-        , ("col", Json.num 1)
-        ])
-    , ("metrics", metricsJsonFrom m)
-    , ("tags", Json.arr #[])
-    , ("children", Json.arr children)
+    , ("metrics", metricsJsonFrom node.metrics)
+    , ("tags", tagsJson node.isFile)
+    , ("children", Json.arr childrenJson)
     ]
 
 @[inline] def artifactJson (cfg : ObserveConfig) (generatedAt : String) : IO Json := do
   if cfg.sample then
     let sampleMetrics : FileMetrics := { loc := 1200, locNonEmpty := 1100, commentLines := 200 }
+    let rootPath := System.FilePath.mk cfg.root
+    let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -197,19 +231,18 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
           , ("commit", Json.str "")
           , ("tool", Json.str "leanobserve")
           ])
-      , ("root", rootNodeJsonFrom cfg.root #[] sampleMetrics)
+      , ("root", nodeAccToJson rootAcc)
       ]
   let root := System.FilePath.mk cfg.root
   let filesAll ← listLeanFiles root
   let files := match cfg.maxFiles? with
     | some n => takeArray filesAll n
     | none => filesAll
-  let mut total : FileMetrics := {}
-  let mut children : Array Json := #[]
+  let mut rootAcc := emptyNode "root" root
   for p in files do
     let m ← readFileMetrics p
-    total := total.add m
-    children := children.push (fileNodeJson p m)
+    let comps := relativeComponents root p
+    rootAcc := insertNode rootAcc root comps p m
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
     , ("generated_at", Json.str generatedAt)
@@ -219,7 +252,7 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
         , ("commit", Json.str "")
         , ("tool", Json.str "leanobserve")
         ])
-    , ("root", rootNodeJsonFrom cfg.root children total)
+    , ("root", nodeAccToJson rootAcc)
     ]
 
 @[inline] def runLeanObserveCmd (p : Cli.Parsed) : IO UInt32 := do
