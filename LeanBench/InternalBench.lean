@@ -145,6 +145,14 @@ def cfgScanLines : BenchConfig := {
   samples := 10
 }
 
+def cfgScanLinesFast : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "observe", "scan", "fast"]
+  items := some scanItems
+  bytes := some scanBytes
+  samples := 10
+}
+
 def cfgParseNat : BenchConfig := {
   suite := some "leanbench"
   tags := ["leanbench", "observe", "parse"]
@@ -156,14 +164,6 @@ def cfgParseNat : BenchConfig := {
 def cfgParsecTokens : BenchConfig := {
   suite := some "leanbench"
   tags := ["leanbench", "observe", "parsec"]
-  items := some scanItems
-  bytes := some scanBytes
-  samples := 10
-}
-
-def cfgParsecScan : BenchConfig := {
-  suite := some "leanbench"
-  tags := ["leanbench", "observe", "parsec", "scan"]
   items := some scanItems
   bytes := some scanBytes
   samples := 10
@@ -195,7 +195,7 @@ bench "leanbench/render_plan_500" (cfgPlanRender) do
 
 bench "leanbench/scan_lines_200" (cfgScanLines) do
   let fixtures ← fixturesRef.get
-  let acc := scanLines fixtures.scanLines
+  let acc := LeanBench.ParsecScan.scanLinesParsec fixtures.scanLines
   if acc.loc == 0 then
     IO.println ""
 
@@ -218,8 +218,8 @@ bench "leanbench/parsec_tokenize_200" (cfgParsecTokens) do
   if total == 0 then
     IO.println ""
 
-bench "leanbench/scan_lines_200_parsec" (cfgParsecScan) do
+bench "leanbench/scan_lines_200_fast" (cfgScanLinesFast) do
   let fixtures ← fixturesRef.get
-  let acc := LeanBench.ParsecScan.scanLinesParsec fixtures.scanLines
+  let acc := scanLines fixtures.scanLines
   if acc.loc == 0 then
     IO.println ""

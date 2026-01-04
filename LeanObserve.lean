@@ -2,6 +2,7 @@ import Cli
 import Lean
 import Std
 import LeanBench.TextScan
+import LeanBench.ParsecScan
 
 open Cli
 open Lean
@@ -131,7 +132,7 @@ def registerCollector (c : Collector) : IO Unit :=
 @[inline] def readFileMetricMap (path : System.FilePath) (buildTimeMs : Nat) : IO MetricMap := do
   let content ← IO.FS.readFile path
   let lines := content.splitOn "\n"
-  let acc := scanLines lines
+  let acc := LeanBench.ParsecScan.scanLinesParsec lines
   return metricMapFromScan acc buildTimeMs
 
 @[inline] def stxSpan? (fileMap : FileMap) (filePath : System.FilePath) (stx : Syntax) : Option NodeSpan :=
@@ -748,7 +749,7 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
           match stxSpan? inputCtx.fileMap filePath stx with
           | none => pure ()
           | some span =>
-              let acc := scanLines (sliceLines lines span)
+              let acc := LeanBench.ParsecScan.scanLinesParsec (sliceLines lines span)
               let textMetrics := metricMapFromScan acc 0
               let infoMetrics := infoTreeMetricMap (countInfoTree tree {})
               let metrics := mergeMetricMap textMetrics infoMetrics
