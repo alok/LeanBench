@@ -1,0 +1,139 @@
+import Std
+import Lean.Data.Json
+import LeanBench
+import LeanBench.Runner
+import LeanBench.Plan
+import LeanBench.Json
+
+open LeanBench
+
+def dummyCfg : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "internal"]
+  bytes := some 1024
+  flops := some 2048
+  items := some 256
+}
+
+def mkStats (base : Nat) : BenchStats :=
+  { meanNs := Float.ofNat base
+    stddevNs := 0.0
+    minNs := base
+    maxNs := base + 1
+    medianNs := base
+    p95Ns := base
+    p99Ns := base
+    totalNs := base * 10
+    samples := 10 }
+
+def mkResult (i : Nat) : BenchResult :=
+  let entry : Bench := {
+    name := s!"bench_{i}"
+    action := pure ()
+    config := dummyCfg
+    report? := none
+  }
+  { entry := entry
+    config := dummyCfg
+    stats := mkStats (1000 + i)
+    samples := #[(1000 + i)]
+    extras := none }
+
+def mkPlanEntry (i : Nat) : BenchPlanEntry :=
+  { id := s!"leanbench/bench_{i}"
+    name := s!"bench_{i}"
+    suite := some "leanbench"
+    tags := ["leanbench", "internal"]
+    config := dummyCfg }
+
+def dummyCount : Nat := 500
+
+structure BenchFixtures where
+  results : Array BenchResult
+  planCore : PlanCore
+  escapeInput : String
+  deriving Inhabited
+
+def buildFixtures : BenchFixtures := Id.run do
+  let mut results : Array BenchResult := #[]
+  for i in [0:dummyCount] do
+    results := results.push (mkResult i)
+  let mut planEntries : Array BenchPlanEntry := #[]
+  for i in [0:dummyCount] do
+    planEntries := planEntries.push (mkPlanEntry i)
+  let planCore : PlanCore := {
+    version := 1
+    seed := 42
+    shuffled := true
+    partition := none
+    entries := planEntries
+  }
+  let mut chars : Array Char := #[]
+  for _ in [0:200000] do
+    chars := chars.push '"'
+    chars := chars.push '\\'
+    chars := chars.push '\n'
+    chars := chars.push '\t'
+    chars := chars.push 'a'
+  let escapeInput := String.ofList chars.toList
+  return { results := results, planCore := planCore, escapeInput := escapeInput }
+
+def fixturesForConfig : BenchFixtures := buildFixtures
+
+initialize fixturesRef : IO.Ref BenchFixtures <- IO.mkRef buildFixtures
+
+def escapeBytes : Nat := fixturesForConfig.escapeInput.length
+def prettyBytes : Nat := (renderPrettyTable fixturesForConfig.results none false).length
+def jsonBytes : Nat := (renderJson fixturesForConfig.results).length
+def planBytes : Nat := (renderPlanCoreJson fixturesForConfig.planCore).length
+
+def cfgJsonEscape : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "json"]
+  bytes := some escapeBytes
+}
+
+def cfgPretty : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "render", "pretty"]
+  items := some dummyCount
+  bytes := some prettyBytes
+}
+
+def cfgJsonRender : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "render", "json"]
+  items := some dummyCount
+  bytes := some jsonBytes
+}
+
+def cfgPlanRender : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "render", "plan"]
+  items := some dummyCount
+  bytes := some planBytes
+}
+
+bench "leanbench/json_escape_1m" (cfgJsonEscape) do
+  let fixtures ← fixturesRef.get
+  let out := jsonEscape fixtures.escapeInput
+  if out.length == 0 then
+    IO.println ""
+
+bench "leanbench/render_pretty_500" (cfgPretty) do
+  let fixtures ← fixturesRef.get
+  let out := renderPrettyTable fixtures.results none false
+  if out.length == 0 then
+    IO.println ""
+
+bench "leanbench/render_json_500" (cfgJsonRender) do
+  let fixtures ← fixturesRef.get
+  let out := renderJson fixtures.results
+  if out.length == 0 then
+    IO.println ""
+
+bench "leanbench/render_plan_500" (cfgPlanRender) do
+  let fixtures ← fixturesRef.get
+  let out := renderPlanCoreJson fixtures.planCore
+  if out.length == 0 then
+    IO.println ""

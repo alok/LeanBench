@@ -330,12 +330,12 @@ structure BenchResult where
   let renderRow (row : Array String) : String :=
     let cols := (List.range row.size).map fun i => padRight row[i]! (widths[i]!)
     String.intercalate "  " cols
-  let mut out := ""
-  out := out ++ renderRow header ++ "\n"
-  out := out ++ renderRow (header.map (fun h => String.ofList (List.replicate h.length '-'))) ++ "\n"
+  let headerLine := renderRow header
+  let ruleLine := renderRow (header.map (fun h => String.ofList (List.replicate h.length '-')))
+  let mut lines : Array String := #[headerLine, ruleLine]
   for row in rows do
-    out := out ++ renderRow row ++ "\n"
-  return out
+    lines := lines.push (renderRow row)
+  return String.intercalate "\n" lines.toList ++ "\n"
 
 @[inline] def suiteKey (s : Option String) : String :=
   s.getD "(none)"
@@ -353,14 +353,14 @@ structure BenchResult where
   if !groupBySuite then
     return renderPrettyTable results baseline? full
   let groups := groupResultsBySuite results
-  let mut out := ""
+  let mut blocks : Array String := #[]
   for idx in [:groups.size] do
     let (name, group) := groups[idx]!
-    out := out ++ s!"suite: {name}\n"
-    out := out ++ renderPrettyTable group baseline? full
+    let mut block := s!"suite: {name}\n" ++ renderPrettyTable group baseline? full
     if idx + 1 < groups.size then
-      out := out ++ "\n"
-  return out
+      block := block ++ "\n"
+    blocks := blocks.push block
+  return String.intercalate "" blocks.toList
 
 @[inline] def renderPretty (results : Array BenchResult) : String :=
   renderPrettyWithBaseline results none false false
