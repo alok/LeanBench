@@ -15,6 +15,9 @@ structure ObserveConfig where
   buildLog? : Option String := none
   profileJson? : Option String := none
   infoTree : Bool := false
+  reportJson? : Option String := none
+  reportMd? : Option String := none
+  reportTop : Nat := 30
 
 @[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
   Id.run do
@@ -41,6 +44,15 @@ structure ObserveConfig where
     | none => pure ()
     if p.hasFlag "infotree" then
       cfg := { cfg with infoTree := true }
+    match p.flag? "report-json" with
+    | some f => cfg := { cfg with reportJson? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "report-md" with
+    | some f => cfg := { cfg with reportMd? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "report-top" with
+    | some f => cfg := { cfg with reportTop := f.as! Nat }
+    | none => pure ()
     return cfg
 
 abbrev MetricKey := String
@@ -624,6 +636,89 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
     , ("children", Json.arr childrenJson)
     ]
 
+structure ReportItem where
+  name : String
+  path : String
+  value : Nat
+
+structure MetricReport where
+  key : String
+  label : String
+  top : List ReportItem
+
+structure Report where
+  generatedAt : String
+  root : String
+  metrics : List MetricReport
+
+partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
+  if node.isFile || node.children.isEmpty then
+    [node]
+  else
+    node.children.foldl (fun acc child => acc ++ collectLeaves child) []
+
+@[inline] def reportMetricValue (m : MetricMap) (key : String) : Nat :=
+  let derived := addDerivedMetrics m
+  metricGetD derived key
+
+@[inline] def buildMetricReport (spec : MetricSpec) (leaves : List NodeAcc) (topN : Nat) : MetricReport :=
+  let items := leaves.map (fun leaf =>
+    { name := leaf.name, path := leaf.path.toString, value := reportMetricValue leaf.metrics spec.key })
+  let items := (items.toArray.qsort (fun a b => a.value > b.value)).toList
+  let top := items.take topN
+  { key := spec.key, label := spec.label, top := top }
+
+@[inline] def reportToJson (r : Report) : Json :=
+  let metricsJson := r.metrics.map (fun m =>
+    Json.mkObj
+      [ ("key", Json.str m.key)
+      , ("label", Json.str m.label)
+      , ("top", Json.arr <| (m.top.map (fun item =>
+          Json.mkObj
+            [ ("name", Json.str item.name)
+            , ("path", Json.str item.path)
+            , ("value", num item.value)
+            ])).toArray)
+      ])
+  Json.mkObj
+    [ ("generated_at", Json.str r.generatedAt)
+    , ("root", Json.str r.root)
+    , ("metrics", Json.arr metricsJson.toArray)
+    ]
+
+@[inline] def reportToMarkdown (r : Report) : String :=
+  let header := s!"# Lean Observatory Report\n\nGenerated: {r.generatedAt}\nRoot: {r.root}\n"
+  let sections :=
+    r.metrics.map (fun m =>
+      let items :=
+        (enumerate 0 m.top).map (fun (idx, item) =>
+          s!"{idx + 1}. {item.value} — {item.path}"
+        ) |> String.intercalate "\n"
+      s!"\n## {m.label} (`{m.key}`)\n\n{items}\n"
+    ) |> String.intercalate "\n"
+  header ++ sections
+
+where
+  enumerate (n : Nat) (xs : List ReportItem) : List (Nat × ReportItem) :=
+    match xs with
+    | [] => []
+    | x :: xs => (n, x) :: enumerate (n + 1) xs
+
+@[inline] def writeReport (cfg : ObserveConfig) (rootAcc : NodeAcc) (specs : Array MetricSpec) (generatedAt : String) : IO Unit := do
+  if cfg.reportJson?.isNone && cfg.reportMd?.isNone then
+    return ()
+  let leaves := collectLeaves rootAcc
+  let metrics := specs.toList.map (fun spec => buildMetricReport spec leaves cfg.reportTop)
+  let report : Report := { generatedAt := generatedAt, root := cfg.root, metrics := metrics }
+  match cfg.reportJson? with
+  | some path =>
+      IO.FS.writeFile (System.FilePath.mk path) (toString <| reportToJson report)
+  | none => pure ()
+  match cfg.reportMd? with
+  | some path =>
+      IO.FS.writeFile (System.FilePath.mk path) (reportToMarkdown report)
+  | none => pure ()
+
 @[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
   let collectors ← getCollectors
   let mut acc : MetricByFile := {}
@@ -920,6 +1015,7 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
     let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs)
+    writeReport cfg rootAcc specs generatedAt
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -949,6 +1045,7 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     let m := metricsByFile.getD p emptyMetricMap
     let comps := relativeComponents root p
     rootAcc := insertNode rootAcc root comps p m
+  writeReport cfg rootAcc specs generatedAt
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
     , ("generated_at", Json.str generatedAt)
@@ -987,6 +1084,9 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     "build-log" : String; "Path to build log with timing entries (optional)"
     "profile-json" : String; "Path to trace.profiler.output JSON (optional)"
     infotree; "Collect InfoTree summary metrics (slow; requires lake env)"
+    "report-json" : String; "Write agent report JSON to path (optional)"
+    "report-md" : String; "Write agent report Markdown to path (optional)"
+    "report-top" : Nat; "Top N items per metric in report (default: 30)"
     sample; "Emit sample metrics values"
 ]
 

@@ -4,3 +4,5 @@
 /artifacts/metrics.json
 /artifacts/trace-profiler.json
 /artifacts/lakefile.profile.toml
+/artifacts/report.json
+/artifacts/report.md

@@ -126,6 +126,9 @@ Usage note:
 - Run `leanobserve` under `lake env` so `LEAN_PATH` is set for imports, e.g.
   `lake env ./.lake/build/bin/leanobserve --root . --out artifacts/metrics.json --infotree`
 
+Agent loop:
+- `./scripts/observe_agent_loop.sh . artifacts infotree` generates metrics + report and starts a local server.
+
 Phase 2 (profiling/tracing):
 - enable `trace.profiler` globally (lakefile or wrapper)
 - aggregate by decl and file

@@ -60,6 +60,14 @@ const detailBody = document.getElementById("detailBody") as HTMLDivElement | nul
 
 const BLEND_KEY = "__blend__";
 
+const urlParams = new URLSearchParams(window.location.search);
+const initialDataUrl = urlParams.get("data");
+const initialRoot = urlParams.get("root");
+const initialSize = urlParams.get("size");
+const initialColor = urlParams.get("color");
+const initialList = urlParams.get("list");
+const initialListCount = urlParams.get("listCount");
+
 const state: {
   data: ObservatoryData | null;
   sizeKey: string | null;
@@ -215,6 +223,18 @@ function updateMetricSelectors(): void {
   sizeSelect.value = state.sizeKey || "";
   colorSelect.value = state.colorKey || "";
   if (listSelect) listSelect.value = state.listKey || "";
+  renderBlendPanel();
+}
+
+function applyMetricOverrides(): void {
+  if (!sizeSelect || !colorSelect) return;
+  if (initialSize) state.sizeKey = initialSize;
+  if (initialColor) state.colorKey = initialColor;
+  if (initialList) state.listKey = initialList;
+  if (state.sizeKey) sizeSelect.value = state.sizeKey;
+  if (state.colorKey) colorSelect.value = state.colorKey;
+  if (listSelect && state.listKey) listSelect.value = state.listKey;
+  if (listCount && initialListCount) listCount.value = initialListCount;
   renderBlendPanel();
 }
 
@@ -463,6 +483,31 @@ fileInput?.addEventListener("change", async (event) => {
   updateMetricSelectors();
   renderTreemap();
 });
+
+async function loadFromUrl(url: string): Promise<void> {
+  const resolved = new URL(url, window.location.href).toString();
+  const resp = await fetch(resolved);
+  const parsed = (await resp.json()) as ObservatoryData;
+  state.data = parsed;
+  if (!state.rootPrefix && parsed.project?.root && parsed.project.root.startsWith("/")) {
+    state.rootPrefix = parsed.project.root;
+    if (rootInput) rootInput.value = state.rootPrefix;
+  }
+  updateMetricSelectors();
+  applyMetricOverrides();
+  renderTreemap();
+}
+
+if (initialRoot && rootInput) {
+  state.rootPrefix = initialRoot;
+  rootInput.value = initialRoot;
+}
+
+if (initialDataUrl) {
+  loadFromUrl(initialDataUrl).catch((err) => {
+    console.error(err);
+  });
+}
 
 rootInput?.addEventListener("input", (event) => {
   const target = event.target as HTMLInputElement;

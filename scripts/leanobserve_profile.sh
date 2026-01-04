@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="${1:-.}"
 out_dir="${2:-artifacts}"
+shift 2 || true
 
 mkdir -p "$out_dir"
 
@@ -28,6 +29,7 @@ lake --file "$tmp_lakefile" build --rehash --no-cache -v 2>&1 | tee "$build_log"
   --root "$root" \
   --build-log "$build_log" \
   --profile-json "$profile_json" \
-  --out "$metrics_json"
+  --out "$metrics_json" \
+  "$@"
 
 echo "wrote $metrics_json"
