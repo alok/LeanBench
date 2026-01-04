@@ -1,0 +1,140 @@
+:root {
+  --bg: #0f1419;
+  --panel: #141c24;
+  --panel-2: #1d2733;
+  --accent: #ff7a59;
+  --accent-2: #4bd5ff;
+  --text: #e7edf3;
+  --muted: #9eb1c1;
+  --border: #2a3a4a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: radial-gradient(1200px 800px at 10% -10%, #263043 0%, transparent 60%),
+    radial-gradient(900px 700px at 90% 10%, #1b2735 0%, transparent 55%),
+    var(--bg);
+  min-height: 100vh;
+}
+
+.topbar {
+  display: grid;
+  gap: 16px;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(20, 28, 36, 0.9), rgba(15, 20, 25, 0.95));
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.badge {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+}
+
+.title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.control {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.control input,
+.control select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.control.toggle {
+  align-content: center;
+  grid-auto-flow: column;
+  justify-content: start;
+}
+
+.control.toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.panel {
+  padding: 24px 32px 40px;
+}
+
+#treemap {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  min-height: 65vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.tooltip {
+  position: fixed;
+  background: rgba(15, 20, 25, 0.95);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  pointer-events: none;
+  max-width: 360px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.tile {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1px;
+}
+
+.label {
+  font-size: 11px;
+  fill: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    padding: 20px;
+  }
+
+  .panel {
+    padding: 20px;
+  }
+}

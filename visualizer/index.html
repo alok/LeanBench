@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lean Observatory — Treemap</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="badge">Lean Observatory</div>
+        <div class="title">Treemap Explorer</div>
+      </div>
+      <div class="controls">
+        <label class="control">
+          <span>Metrics JSON</span>
+          <input id="fileInput" type="file" accept="application/json" />
+        </label>
+        <label class="control">
+          <span>Root Path (for editor links)</span>
+          <input id="rootInput" type="text" placeholder="/abs/path/to/project" />
+        </label>
+        <label class="control">
+          <span>Size Metric</span>
+          <select id="sizeSelect"></select>
+        </label>
+        <label class="control">
+          <span>Color Metric</span>
+          <select id="colorSelect"></select>
+        </label>
+        <label class="control toggle">
+          <input id="showLabels" type="checkbox" />
+          <span>Show labels</span>
+        </label>
+      </div>
+    </header>
+
+    <main class="panel">
+      <div id="treemap"></div>
+      <div id="tooltip" class="tooltip" hidden></div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
