@@ -35,28 +35,60 @@ structure ObserveConfig where
     | none => pure ()
     return cfg
 
-structure FileMetrics where
-  loc : Nat := 0
-  locNonEmpty : Nat := 0
-  commentLines : Nat := 0
-  todo : Nat := 0
-  fixme : Nat := 0
-  portingNote : Nat := 0
-  adaptationNote : Nat := 0
-  nolint : Nat := 0
-  buildTimeMs : Nat := 0
+abbrev MetricKey := String
+abbrev MetricMap := Std.HashMap MetricKey Nat
+abbrev MetricByFile := Std.HashMap System.FilePath MetricMap
 
-@[inline] def FileMetrics.add (a b : FileMetrics) : FileMetrics :=
-  { loc := a.loc + b.loc
-  , locNonEmpty := a.locNonEmpty + b.locNonEmpty
-  , commentLines := a.commentLines + b.commentLines
-  , todo := a.todo + b.todo
-  , fixme := a.fixme + b.fixme
-  , portingNote := a.portingNote + b.portingNote
-  , adaptationNote := a.adaptationNote + b.adaptationNote
-  , nolint := a.nolint + b.nolint
-  , buildTimeMs := a.buildTimeMs + b.buildTimeMs
-  }
+structure MetricSpec where
+  key : String
+  label : String
+  kind : String := "count"
+  unit : String := ""
+  description : String := ""
+  group : String := ""
+  defaultBlendWeight : Nat := 0
+
+@[inline] def MetricSpec.toJson (m : MetricSpec) : Json :=
+  Json.mkObj
+    [ ("key", Json.str m.key)
+    , ("label", Json.str m.label)
+    , ("kind", Json.str m.kind)
+    , ("unit", Json.str m.unit)
+    , ("description", Json.str m.description)
+    , ("group", Json.str m.group)
+    , ("default_blend_weight", Json.num (m.defaultBlendWeight : JsonNumber))
+    ]
+
+structure CollectContext where
+  cfg : ObserveConfig
+  root : System.FilePath
+  files : Array System.FilePath
+  buildTimes : Std.HashMap String Nat
+
+structure Collector where
+  id : String
+  specs : Array MetricSpec
+  collect : CollectContext → IO MetricByFile
+
+initialize collectorRegistry : IO.Ref (Array Collector) ← IO.mkRef #[]
+
+def registerCollector (c : Collector) : IO Unit :=
+  collectorRegistry.modify (·.push c)
+
+@[inline] def getCollectors : IO (Array Collector) :=
+  collectorRegistry.get
+
+@[inline] def emptyMetricMap : MetricMap := {}
+
+@[inline] def mergeMetricMap (a b : MetricMap) : MetricMap :=
+  b.fold (init := a) (fun acc k v =>
+    let prev := acc.getD k 0
+    acc.insert k (prev + v))
+
+@[inline] def mergeByFile (a b : MetricByFile) : MetricByFile :=
+  b.fold (init := a) (fun acc path metrics =>
+    let prev := acc.getD path emptyMetricMap
+    acc.insert path (mergeMetricMap prev metrics))
 
 @[inline] def isPrefixChars (pre s : List Char) : Bool :=
   match pre, s with
@@ -80,9 +112,154 @@ structure FileMetrics where
 @[inline] def lineHas (lowerLine : String) (needle : String) : Bool :=
   containsSubstr lowerLine needle
 
-@[inline] def lineMetrics (line : String) (inBlock : Bool) (acc : FileMetrics) : FileMetrics × Bool :=
+@[inline] def isWhitespace (c : Char) : Bool :=
+  c == ' ' || c == '\t' || c == '\n' || c == '\r'
+
+@[inline] def isWordChar (c : Char) : Bool :=
+  Char.isAlphanum c || c == '_' || c == '.'
+
+@[inline] def isWordToken (tok : String) : Bool :=
+  let chars := tok.toList
+  chars.any Char.isAlphanum && chars.all isWordChar
+
+partial def tokenizeLine (line : String) : List String :=
+  let rec flush (current : List Char) (acc : List String) : List String :=
+    if current.isEmpty then acc else (String.ofList current.reverse) :: acc
+  let rec go (chars : List Char) (current : List Char) (acc : List String) : List String :=
+    match chars with
+    | [] => (flush current acc).reverse
+    | c :: cs =>
+        if isWhitespace c then
+          go cs [] (flush current acc)
+        else if isWordChar c then
+          go cs (c :: current) acc
+        else
+          let acc := flush current acc
+          match c, cs with
+          | ':', '=' :: rest => go rest [] (":=" :: acc)
+          | '<', '-' :: rest => go rest [] ("<-" :: acc)
+          | '-', '>' :: rest => go rest [] ("->" :: acc)
+          | _, _ => go cs [] (String.singleton c :: acc)
+  go line.toList [] []
+
+@[inline] def countIndent (chars : List Char) : Nat :=
+  match chars with
+  | [] => 0
+  | ' ' :: cs => 1 + countIndent cs
+  | '\t' :: cs => 2 + countIndent cs
+  | _ :: _ => 0
+
+@[inline] def indentLevel (line : String) : Nat :=
+  countIndent line.toList
+
+@[inline] def popWhile (stack : List Nat) (p : Nat → Bool) : List Nat :=
+  match stack with
+  | [] => []
+  | x :: xs => if p x then popWhile xs p else stack
+
+structure ScanAcc where
+  loc : Nat := 0
+  locNonEmpty : Nat := 0
+  commentLines : Nat := 0
+  todo : Nat := 0
+  fixme : Nat := 0
+  portingNote : Nat := 0
+  adaptationNote : Nat := 0
+  nolint : Nat := 0
+  size : Nat := 0
+  ifPoints : Nat := 0
+  ifDepthMax : Nat := 0
+  loopDepthMax : Nat := 0
+  assignments : Nat := 0
+  globalReads : Nat := 0
+  globalWrites : Nat := 0
+  heapAllocs : Nat := 0
+  heapFrees : Nat := 0
+  callSites : Nat := 0
+  callQualified : Nat := 0
+  callNames : Std.HashSet String := {}
+  ifStack : List Nat := []
+  loopStack : List Nat := []
+
+@[inline] def pushIf (acc : ScanAcc) (indent : Nat) : ScanAcc :=
+  let stack := indent :: acc.ifStack
+  let depth := stack.length
+  let maxDepth := if depth > acc.ifDepthMax then depth else acc.ifDepthMax
+  { acc with ifStack := stack, ifDepthMax := maxDepth }
+
+@[inline] def pushLoop (acc : ScanAcc) (indent : Nat) : ScanAcc :=
+  let stack := indent :: acc.loopStack
+  let depth := stack.length
+  let maxDepth := if depth > acc.loopDepthMax then depth else acc.loopDepthMax
+  { acc with loopStack := stack, loopDepthMax := maxDepth }
+
+partial def pushIfTimes (acc : ScanAcc) (indent : Nat) (n : Nat) : ScanAcc :=
+  if n == 0 then acc else pushIfTimes (pushIf acc indent) indent (n - 1)
+
+partial def pushLoopTimes (acc : ScanAcc) (indent : Nat) (n : Nat) : ScanAcc :=
+  if n == 0 then acc else pushLoopTimes (pushLoop acc indent) indent (n - 1)
+
+@[inline] def endsWithAny (tok : String) (suffixes : List String) : Bool :=
+  suffixes.any (fun s => tok.endsWith s)
+
+@[inline] def countSuffixMatches (tokens : List String) (suffixes : List String) : Nat :=
+  tokens.foldl (fun acc t => if endsWithAny t suffixes then acc + 1 else acc) 0
+
+def keywordList : List String :=
+  [ "if", "then", "else", "match", "with", "let", "in", "do", "for", "while", "repeat"
+  , "by", "have", "show", "fun", "namespace", "section", "open", "export"
+  , "theorem", "lemma", "def", "structure", "inductive", "class", "instance", "abbrev"
+  , "macro", "syntax", "notation", "set_option", "local", "protected", "private", "public"
+  , "where", "case", "deriving", "return", "simp"
+  ]
+
+def keywordSet : Std.HashSet String :=
+  Id.run do
+    let mut s : Std.HashSet String := {}
+    for k in keywordList do
+      s := s.insert k
+    return s
+
+def defLinePrefixes : List String :=
+  [ "def", "theorem", "lemma", "example", "abbrev", "structure", "inductive", "class"
+  , "instance", "macro", "syntax", "notation", "axiom", "constant", "opaque"
+  ]
+
+@[inline] def isDefLine (trimmed : String) : Bool :=
+  defLinePrefixes.any (fun k => trimmed.startsWith s!"{k} ")
+
+@[inline] def isCallCandidate (tok : String) : Bool :=
+  isWordToken tok && !(keywordSet.contains tok)
+
+@[inline] def isCallNext (tok : String) : Bool :=
+  isWordToken tok || tok == "(" || tok == "[" || tok == "{"
+
+@[inline] def countCalls (tokens : List String) (callNames : Std.HashSet String) :
+    Nat × Nat × Std.HashSet String :=
+  let rec go (ts : List String) (sites : Nat) (qualified : Nat)
+      (names : Std.HashSet String) : Nat × Nat × Std.HashSet String :=
+    match ts with
+    | [] => (sites, qualified, names)
+    | t :: rest =>
+        let next? := rest.head?
+        let isCall :=
+          match next? with
+          | some nxt => isCallCandidate t && isCallNext nxt
+          | none => false
+        let (sites, qualified, names) :=
+          if isCall then
+            let sites := sites + 1
+            let qualified := if containsSubstr t "." then qualified + 1 else qualified
+            let names := names.insert t
+            (sites, qualified, names)
+          else
+            (sites, qualified, names)
+        go rest sites qualified names
+  go tokens 0 0 callNames
+
+@[inline] def lineMetrics (line : String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc × Bool :=
   let acc := { acc with loc := acc.loc + 1 }
-  let trimmed := line.trimAscii
+  let trimmed := line.trimAscii.toString
   let acc := if trimmed.isEmpty then acc else { acc with locNonEmpty := acc.locNonEmpty + 1 }
   let lower := line.toLower
   let acc := if lineHas lower "todo" then { acc with todo := acc.todo + 1 } else acc
@@ -92,21 +269,58 @@ structure FileMetrics where
   let acc := if lineHas lower "nolint" then { acc with nolint := acc.nolint + 1 } else acc
   let hasBlockStart := lineHas line "/-"
   let hasBlockEnd := lineHas line "-/"
-  if inBlock then
-    let acc := { acc with commentLines := acc.commentLines + 1 }
-    let inBlock := if hasBlockEnd then false else true
-    (acc, inBlock)
-  else if trimmed.startsWith "--" then
-    ({ acc with commentLines := acc.commentLines + 1 }, false)
-  else if hasBlockStart then
-    let acc := { acc with commentLines := acc.commentLines + 1 }
-    let inBlock := if hasBlockEnd then false else true
+  let isLineComment := trimmed.startsWith "--"
+  let isCommentLine := inBlock || isLineComment || hasBlockStart
+  let acc := if isCommentLine then { acc with commentLines := acc.commentLines + 1 } else acc
+  let inBlock :=
+    if inBlock then
+      if hasBlockEnd then false else true
+    else if hasBlockStart && !hasBlockEnd then
+      true
+    else
+      false
+  if isCommentLine then
     (acc, inBlock)
   else
-    (acc, false)
+    let indent := indentLevel line
+    let keepIf := trimmed.startsWith "else"
+    let ifStack := popWhile acc.ifStack (fun lvl => indent <= lvl && !keepIf)
+    let loopStack := popWhile acc.loopStack (fun lvl => indent <= lvl)
+    let acc := { acc with ifStack := ifStack, loopStack := loopStack }
+    let tokens := tokenizeLine line
+    let wordTokens := tokens.filter isWordToken
+    let acc := { acc with size := acc.size + wordTokens.length }
+    let ifCount := wordTokens.foldl (fun n t => if t == "if" then n + 1 else n) 0
+    let loopCount := wordTokens.foldl (fun n t =>
+      if t == "for" || t == "while" || t == "repeat" then n + 1 else n) 0
+    let acc := { acc with ifPoints := acc.ifPoints + ifCount }
+    let acc := pushIfTimes acc indent ifCount
+    let acc := pushLoopTimes acc indent loopCount
+    let assignmentCount := tokens.foldl (fun n t => if t == ":=" || t == "<-" then n + 1 else n) 0
+    let acc := { acc with assignments := acc.assignments + assignmentCount }
+    let readSuffixes := [".get", ".get!", ".getD", ".get?", ".read", ".read?"]
+    let writeSuffixes := [".set", ".set!", ".modify", ".write", ".write?"]
+    let allocSuffixes :=
+      [".mkRef", ".mkArray", ".mkEmpty", ".empty", ".singleton", ".push"]
+    let freeSuffixes :=
+      [".clear", ".erase", ".eraseD", ".pop", ".pop?", ".reset", ".shrink", ".release", ".dispose"]
+    let acc := { acc with globalReads := acc.globalReads + countSuffixMatches wordTokens readSuffixes }
+    let acc := { acc with globalWrites := acc.globalWrites + countSuffixMatches wordTokens writeSuffixes }
+    let acc := { acc with heapAllocs := acc.heapAllocs + countSuffixMatches wordTokens allocSuffixes }
+    let acc := { acc with heapFrees := acc.heapFrees + countSuffixMatches wordTokens freeSuffixes }
+    let acc :=
+      if isDefLine trimmed then
+        acc
+      else
+        let (sites, qualified, names) := countCalls tokens acc.callNames
+        { acc with
+          callSites := acc.callSites + sites
+          callQualified := acc.callQualified + qualified
+          callNames := names }
+    (acc, inBlock)
 
-@[inline] def scanLines (lines : List String) : FileMetrics :=
-  let rec go (lines : List String) (inBlock : Bool) (acc : FileMetrics) : FileMetrics :=
+@[inline] def scanLines (lines : List String) : ScanAcc :=
+  let rec go (lines : List String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc :=
     match lines with
     | [] => acc
     | line :: rest =>
@@ -114,11 +328,33 @@ structure FileMetrics where
         go rest inBlock acc
   go lines false {}
 
-@[inline] def readFileMetrics (path : System.FilePath) (buildTimeMs : Nat) : IO FileMetrics := do
+@[inline] def readFileMetricMap (path : System.FilePath) (buildTimeMs : Nat) : IO MetricMap := do
   let content ← IO.FS.readFile path
   let lines := content.splitOn "\n"
-  let m := scanLines lines
-  return { m with buildTimeMs := buildTimeMs }
+  let acc := scanLines lines
+  let mut m : MetricMap := {}
+  m := m.insert "loc" acc.loc
+  m := m.insert "loc_nonempty" acc.locNonEmpty
+  m := m.insert "comment_lines" acc.commentLines
+  m := m.insert "todo" acc.todo
+  m := m.insert "fixme" acc.fixme
+  m := m.insert "porting_note" acc.portingNote
+  m := m.insert "adaptation_note" acc.adaptationNote
+  m := m.insert "nolint" acc.nolint
+  m := m.insert "size" acc.size
+  m := m.insert "if_points" acc.ifPoints
+  m := m.insert "if_depth_max" acc.ifDepthMax
+  m := m.insert "loop_depth_max" acc.loopDepthMax
+  m := m.insert "assignments" acc.assignments
+  m := m.insert "global_reads" acc.globalReads
+  m := m.insert "global_writes" acc.globalWrites
+  m := m.insert "heap_allocations" acc.heapAllocs
+  m := m.insert "heap_frees" acc.heapFrees
+  m := m.insert "call_sites" acc.callSites
+  m := m.insert "call_qualified" acc.callQualified
+  m := m.insert "call_distinct" acc.callNames.size
+  m := m.insert "build_time_ms" buildTimeMs
+  return m
 
 @[inline] def trimAsciiString (s : String) : String :=
   s.toSlice.trimAscii.toString
@@ -191,19 +427,22 @@ structure FileMetrics where
   let tokens := (line.splitOn " ").filter (fun s => s != "")
   tokens.findSome? parseMsToken?
 
-@[inline] def parseBuildLog (path : System.FilePath) : IO (List (String × Nat)) := do
+@[inline] def parseBuildLog (path : System.FilePath) : IO (Std.HashMap String Nat) := do
   let content ← IO.FS.readFile path
-  let mut acc : List (String × Nat) := []
+  let mut acc : Std.HashMap String Nat := {}
   for line in content.splitOn "\n" do
     match extractLeanPath? line, extractDurationMs? line with
-    | some p, some ms => acc := (p, ms) :: acc
+    | some p, some ms => acc := acc.insert p ms
     | _, _ => pure ()
   return acc
 
-@[inline] def findBuildTimeMs? (entries : List (String × Nat)) (path : System.FilePath) : Option Nat :=
+@[inline] def findBuildTimeMs (entries : Std.HashMap String Nat) (path : System.FilePath) : Nat :=
   let p := path.toString
-  entries.findSome? (fun (k, v) =>
-    if k.endsWith p || p.endsWith k then some v else none)
+  match entries.get? p with
+  | some v => v
+  | none =>
+      entries.toList.findSome? (fun (k, v) =>
+        if String.endsWith k p || String.endsWith p k then some v else none) |>.getD 0
 
 @[inline] def shouldSkipDirName (name : String) : Bool :=
   name == ".git" || name == ".lake" || name == "artifacts" || name == "build" || name == ".github"
@@ -231,25 +470,39 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
 @[inline] def ratioBp (num denom : Nat) : Nat :=
   if denom == 0 then 0 else (num * 10000) / denom
 
-@[inline] def metricsJsonFrom (m : FileMetrics) : Json :=
-  Json.mkObj
-    [ ("loc", num m.loc)
-    , ("loc_nonempty", num m.locNonEmpty)
-    , ("comment_lines", num m.commentLines)
-    , ("comment_ratio_bp", num (ratioBp m.commentLines m.locNonEmpty))
-    , ("todo", num m.todo)
-    , ("fixme", num m.fixme)
-    , ("porting_note", num m.portingNote)
-    , ("adaptation_note", num m.adaptationNote)
-    , ("nolint", num m.nolint)
-    , ("build_time_ms", num m.buildTimeMs)
-    ]
+@[inline] def metricGetD (m : MetricMap) (key : String) : Nat :=
+  m.getD key 0
+
+@[inline] def addDerivedMetrics (m : MetricMap) : MetricMap :=
+  let commentRatio := ratioBp (metricGetD m "comment_lines") (metricGetD m "loc_nonempty")
+  let ifDensity := ratioBp (metricGetD m "if_points") (metricGetD m "size")
+  let callSites := metricGetD m "call_sites"
+  let callQualified := metricGetD m "call_qualified"
+  let callDistinct := metricGetD m "call_distinct"
+  let callUnqualified := if callSites > callQualified then callSites - callQualified else 0
+  let callLocalFile := ratioBp callUnqualified callSites
+  let callLocalModule := ratioBp callQualified callSites
+  let callConstancy :=
+    if callSites == 0 then 0
+    else
+      let distinctRatio := ratioBp callDistinct callSites
+      if distinctRatio >= 10000 then 0 else 10000 - distinctRatio
+  let m := m.insert "comment_ratio_bp" commentRatio
+  let m := m.insert "if_density_bp" ifDensity
+  let m := m.insert "call_locality_file_bp" callLocalFile
+  let m := m.insert "call_locality_module_bp" callLocalModule
+  m.insert "call_constancy_bp" callConstancy
+
+@[inline] def metricsJsonFrom (m0 : MetricMap) : Json :=
+  let m := addDerivedMetrics m0
+  let entries := m.toList.map (fun (k, v) => (k, num v))
+  Json.mkObj entries
 
 structure NodeAcc where
   name : String
   path : System.FilePath
   isFile : Bool := false
-  metrics : FileMetrics := {}
+  metrics : MetricMap := {}
   children : List NodeAcc := []
 
 @[inline] def emptyNode (name : String) (path : System.FilePath) : NodeAcc :=
@@ -276,8 +529,8 @@ partial def upsertChild (children : List NodeAcc) (name : String) (path : System
         c :: upsertChild cs name path f
 
 partial def insertNode (node : NodeAcc) (basePath : System.FilePath) (components : List String)
-    (filePath : System.FilePath) (m : FileMetrics) : NodeAcc :=
-  let node := { node with metrics := node.metrics.add m }
+    (filePath : System.FilePath) (m : MetricMap) : NodeAcc :=
+  let node := { node with metrics := mergeMetricMap node.metrics m }
   match components with
   | [] =>
       { node with isFile := true, path := filePath }
@@ -310,11 +563,91 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
     , ("children", Json.arr childrenJson)
     ]
 
+@[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
+  let collectors ← getCollectors
+  let mut acc : MetricByFile := {}
+  for c in collectors do
+    let m ← c.collect ctx
+    acc := mergeByFile acc m
+  return acc
+
+@[inline] def dedupSpecs (specs : Array MetricSpec) : Array MetricSpec :=
+  Id.run do
+    let mut seen : Std.HashSet String := {}
+    let mut out : Array MetricSpec := #[]
+    for s in specs do
+      if seen.contains s.key then
+        pure ()
+      else
+        seen := seen.insert s.key
+        out := out.push s
+    return out
+
+@[inline] def textScanSpecs : Array MetricSpec :=
+  #[
+    { key := "loc", label := "LOC", kind := "count", unit := "lines", group := "structure" },
+    { key := "loc_nonempty", label := "LOC (non-empty)", kind := "count", unit := "lines", group := "structure" },
+    { key := "comment_lines", label := "Comment lines", kind := "count", unit := "lines", group := "quality" },
+    { key := "comment_ratio_bp", label := "Comment ratio", kind := "ratio_bp", unit := "bp", group := "quality" },
+    { key := "todo", label := "TODO", kind := "count", unit := "lines", group := "quality" },
+    { key := "fixme", label := "FIXME", kind := "count", unit := "lines", group := "quality" },
+    { key := "porting_note", label := "Porting notes", kind := "count", unit := "lines", group := "quality" },
+    { key := "adaptation_note", label := "Adaptation notes", kind := "count", unit := "lines", group := "quality" },
+    { key := "nolint", label := "nolint", kind := "count", unit := "lines", group := "quality" },
+    { key := "size", label := "Size (tokens)", kind := "count", unit := "tokens", group := "structure" },
+    { key := "if_points", label := "If points", kind := "count", unit := "count", group := "complexity" },
+    { key := "if_density_bp", label := "If density", kind := "ratio_bp", unit := "bp", group := "complexity",
+      defaultBlendWeight := 20 },
+    { key := "if_depth_max", label := "Max if depth", kind := "max", unit := "depth", group := "complexity" },
+    { key := "loop_depth_max", label := "Max loop depth", kind := "max", unit := "depth", group := "complexity",
+      defaultBlendWeight := 20 },
+    { key := "assignments", label := "Assignments", kind := "count", unit := "count", group := "complexity" },
+    { key := "global_reads", label := "Global reads (heuristic)", kind := "count", unit := "count", group := "effects" },
+    { key := "global_writes", label := "Global writes (heuristic)", kind := "count", unit := "count", group := "effects" },
+    { key := "heap_allocations", label := "Heap allocations (heuristic)", kind := "count", unit := "count", group := "perf",
+      defaultBlendWeight := 30 },
+    { key := "heap_frees", label := "Heap frees (heuristic)", kind := "count", unit := "count", group := "perf" },
+    { key := "call_sites", label := "Call sites", kind := "count", unit := "count", group := "calls" },
+    { key := "call_qualified", label := "Call sites (qualified)", kind := "count", unit := "count", group := "calls" },
+    { key := "call_distinct", label := "Distinct callees", kind := "count", unit := "count", group := "calls" },
+    { key := "call_locality_file_bp", label := "Call locality (file)", kind := "ratio_bp", unit := "bp", group := "calls" },
+    { key := "call_locality_module_bp", label := "Call locality (module)", kind := "ratio_bp", unit := "bp", group := "calls" },
+    { key := "call_constancy_bp", label := "Call constancy", kind := "ratio_bp", unit := "bp", group := "calls" },
+    { key := "build_time_ms", label := "Build time", kind := "time_ms", unit := "ms", group := "build" }
+  ]
+
+@[inline] def collectTextScan (ctx : CollectContext) : IO MetricByFile := do
+  let mut acc : MetricByFile := {}
+  for p in ctx.files do
+    let buildTime := findBuildTimeMs ctx.buildTimes p
+    let m ← readFileMetricMap p buildTime
+    acc := acc.insert p m
+  return acc
+
+initialize registerCollector { id := "text-scan", specs := textScanSpecs, collect := collectTextScan }
+
 @[inline] def artifactJson (cfg : ObserveConfig) (generatedAt : String) : IO Json := do
   if cfg.sample then
-    let sampleMetrics : FileMetrics := { loc := 1200, locNonEmpty := 1100, commentLines := 200, buildTimeMs := 4200 }
+    let mut sampleMetrics : MetricMap := {}
+    sampleMetrics := sampleMetrics.insert "loc" 1200
+    sampleMetrics := sampleMetrics.insert "loc_nonempty" 1100
+    sampleMetrics := sampleMetrics.insert "comment_lines" 200
+    sampleMetrics := sampleMetrics.insert "size" 9000
+    sampleMetrics := sampleMetrics.insert "if_points" 42
+    sampleMetrics := sampleMetrics.insert "if_depth_max" 4
+    sampleMetrics := sampleMetrics.insert "loop_depth_max" 2
+    sampleMetrics := sampleMetrics.insert "assignments" 120
+    sampleMetrics := sampleMetrics.insert "global_reads" 3
+    sampleMetrics := sampleMetrics.insert "global_writes" 1
+    sampleMetrics := sampleMetrics.insert "heap_allocations" 18
+    sampleMetrics := sampleMetrics.insert "heap_frees" 2
+    sampleMetrics := sampleMetrics.insert "call_sites" 300
+    sampleMetrics := sampleMetrics.insert "call_qualified" 40
+    sampleMetrics := sampleMetrics.insert "call_distinct" 80
+    sampleMetrics := sampleMetrics.insert "build_time_ms" 4200
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
+    let specs := dedupSpecs textScanSpecs
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -324,6 +657,7 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
           , ("commit", Json.str "")
           , ("tool", Json.str "leanobserve")
           ])
+      , ("metrics", Json.arr (specs.map MetricSpec.toJson))
       , ("root", nodeAccToJson rootAcc)
       ]
   let root := System.FilePath.mk cfg.root
@@ -333,11 +667,14 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
     | none => filesAll
   let buildTimes ← match cfg.buildLog? with
     | some path => parseBuildLog (System.FilePath.mk path)
-    | none => pure []
+    | none => pure {}
+  let ctx : CollectContext := { cfg := cfg, root := root, files := files, buildTimes := buildTimes }
+  let metricsByFile ← collectAllMetrics ctx
+  let collectors ← getCollectors
+  let specs := dedupSpecs (collectors.foldl (fun acc c => acc ++ c.specs) #[])
   let mut rootAcc := emptyNode "root" root
   for p in files do
-    let buildTime := findBuildTimeMs? buildTimes p |>.getD 0
-    let m ← readFileMetrics p buildTime
+    let m := metricsByFile.getD p emptyMetricMap
     let comps := relativeComponents root p
     rootAcc := insertNode rootAcc root comps p m
   return Json.mkObj
@@ -349,6 +686,7 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
         , ("commit", Json.str "")
         , ("tool", Json.str "leanobserve")
         ])
+    , ("metrics", Json.arr (specs.map MetricSpec.toJson))
     , ("root", nodeAccToJson rootAcc)
     ]
 
@@ -368,7 +706,7 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
     return 1
 
 @[inline] def leanObserveCmd : Cmd := `[Cli|
-  leanobserve VIA runLeanObserveCmd; ["0.1.0"] "Lean Observatory metrics exporter (stub)."
+  leanobserve VIA runLeanObserveCmd; ["0.1.0"] "Lean Observatory metrics exporter."
   FLAGS:
     root : String; "Project root (default: .)"
     out : String; "Output path (default: stdout)"

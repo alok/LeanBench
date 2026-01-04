@@ -37,6 +37,18 @@ The emphasis is on:
    - deep link on click
    - additional views: build timeline, flame graph, dependency graph
 
+## Extensibility / Plugins
+- Metrics registry: collectors provide a `metrics` spec list (label, unit, kind, default blend weight).
+- Collector registry: each collector registers itself; the CLI discovers and merges outputs.
+- External metrics: design for optional merge files (entries keyed by file path) so non-Lean tooling can plug in.
+- UI reads specs from the JSON artifact, so new metrics appear without frontend changes.
+
+## Compiler Hook Path (planned)
+- Short term: run `lake build` with `-Dtrace.profiler=true` and `-Dtrace.profiler.useHeartbeats=true`,
+  capture `trace.profiler.output` (Firefox profiler JSON), and aggregate per-file heartbeats.
+- Mid term: instrument the frontend with an InfoTree visitor to collect decl-level metrics at compile time.
+- Long term: use compiler internals (Environment + Kernel) for precise dependency and term-size metrics.
+
 ## Data Model (schema sketch)
 Each node is a module/command/decl with metrics and source span.
 

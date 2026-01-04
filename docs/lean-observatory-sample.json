@@ -7,42 +7,47 @@
     "commit": "",
     "tool": "leanobserve"
   },
+  "metrics": [
+    { "key": "loc", "label": "LOC", "kind": "count", "unit": "lines", "description": "", "group": "structure", "default_blend_weight": 0 },
+    { "key": "size", "label": "Size (tokens)", "kind": "count", "unit": "tokens", "description": "", "group": "structure", "default_blend_weight": 0 },
+    { "key": "if_density_bp", "label": "If density", "kind": "ratio_bp", "unit": "bp", "description": "", "group": "complexity", "default_blend_weight": 20 },
+    { "key": "heap_allocations", "label": "Heap allocations (heuristic)", "kind": "count", "unit": "count", "description": "", "group": "perf", "default_blend_weight": 30 },
+    { "key": "build_time_ms", "label": "Build time", "kind": "time_ms", "unit": "ms", "description": "", "group": "build", "default_blend_weight": 0 }
+  ],
   "root": {
-    "id": "root",
+    "id": ".",
     "kind": "module",
     "name": "root",
     "path": ".",
-    "span": { "file": "", "line": 1, "col": 1 },
-    "metrics": { "loc": 0, "expr_nodes": 0 },
-    "tags": [],
+    "span": { "file": ".", "line": 1, "col": 1 },
+    "metrics": {
+      "loc": 1200,
+      "size": 9000,
+      "comment_lines": 200,
+      "comment_ratio_bp": 1666,
+      "if_points": 42,
+      "if_density_bp": 46,
+      "heap_allocations": 18,
+      "build_time_ms": 4200
+    },
+    "tags": ["dir"],
     "children": [
       {
         "id": "Mathlib/Algebra/Group/Defs.lean",
         "kind": "module",
-        "name": "Mathlib.Algebra.Group.Defs",
+        "name": "Defs.lean",
         "path": "Mathlib/Algebra/Group/Defs.lean",
         "span": { "file": "Mathlib/Algebra/Group/Defs.lean", "line": 1, "col": 1 },
-        "metrics": { "loc": 1200, "expr_nodes": 25000, "elab_time_ms": 4200 },
-        "tags": ["module"],
-        "children": [
-          {
-            "id": "Mathlib/Algebra/Group/Defs.lean#mul_assoc",
-            "kind": "decl",
-            "name": "mul_assoc",
-            "path": "Mathlib/Algebra/Group/Defs.lean",
-            "span": { "file": "Mathlib/Algebra/Group/Defs.lean", "line": 123, "col": 4 },
-            "metrics": {
-              "loc": 18,
-              "expr_nodes": 290,
-              "infotree_nodes": 1200,
-              "elab_time_ms": 12.3,
-              "heartbeats": 145000,
-              "tactic_calls": 24
-            },
-            "tags": ["theorem"],
-            "children": []
-          }
-        ]
+        "metrics": {
+          "loc": 320,
+          "size": 2100,
+          "if_points": 8,
+          "if_density_bp": 38,
+          "heap_allocations": 6,
+          "build_time_ms": 820
+        },
+        "tags": ["file"],
+        "children": []
       }
     ]
   }

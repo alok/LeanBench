@@ -64,6 +64,55 @@ body {
   gap: 14px;
 }
 
+.blend-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(20, 28, 36, 0.85);
+}
+
+.blend-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.blend-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.blend-item {
+  display: grid;
+  gap: 6px;
+}
+
+.blend-item label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.blend-item .blend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.blend-item input[type=\"range\"] {
+  flex: 1;
+}
+
+.blend-value {
+  font-size: 11px;
+  color: var(--accent-2);
+  min-width: 36px;
+  text-align: right;
+}
+
 .control {
   display: grid;
   gap: 6px;
