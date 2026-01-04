@@ -15,6 +15,7 @@ structure ObserveConfig where
   buildLog? : Option String := none
   profileJson? : Option String := none
   infoTree : Bool := false
+  commandNodes : Bool := false
   reportJson? : Option String := none
   reportMd? : Option String := none
   reportTop : Nat := 30
@@ -43,7 +44,9 @@ structure ObserveConfig where
     | some f => cfg := { cfg with profileJson? := some (f.as! String) }
     | none => pure ()
     if p.hasFlag "infotree" then
-      cfg := { cfg with infoTree := true }
+      cfg := { cfg with infoTree := true, commandNodes := true }
+    if p.hasFlag "command-nodes" then
+      cfg := { cfg with commandNodes := true }
     match p.flag? "report-json" with
     | some f => cfg := { cfg with reportJson? := some (f.as! String) }
     | none => pure ()
@@ -58,6 +61,23 @@ structure ObserveConfig where
 abbrev MetricKey := String
 abbrev MetricMap := Std.HashMap MetricKey Nat
 abbrev MetricByFile := Std.HashMap System.FilePath MetricMap
+
+structure NodeSpan where
+  file : String
+  line : Nat
+  col : Nat
+  endLine : Nat := line
+  endCol : Nat := col
+
+structure NodeAcc where
+  id : String
+  name : String
+  path : System.FilePath
+  kind : String := "module"
+  span : NodeSpan
+  isFile : Bool := false
+  metrics : MetricMap := {}
+  children : List NodeAcc := []
 
 structure MetricSpec where
   key : String
@@ -84,6 +104,7 @@ structure CollectContext where
   root : System.FilePath
   files : Array System.FilePath
   buildTimes : Std.HashMap String Nat
+  commandNodesRef : IO.Ref (Std.HashMap System.FilePath (Array NodeAcc))
 
 structure Collector where
   id : String
@@ -348,33 +369,128 @@ def defLinePrefixes : List String :=
         go rest inBlock acc
   go lines false {}
 
+@[inline] def metricMapFromScan (acc : ScanAcc) (buildTimeMs : Nat) : MetricMap :=
+  Id.run do
+    let mut m : MetricMap := {}
+    m := m.insert "loc" acc.loc
+    m := m.insert "loc_nonempty" acc.locNonEmpty
+    m := m.insert "comment_lines" acc.commentLines
+    m := m.insert "todo" acc.todo
+    m := m.insert "fixme" acc.fixme
+    m := m.insert "porting_note" acc.portingNote
+    m := m.insert "adaptation_note" acc.adaptationNote
+    m := m.insert "nolint" acc.nolint
+    m := m.insert "size" acc.size
+    m := m.insert "if_points" acc.ifPoints
+    m := m.insert "if_depth_max" acc.ifDepthMax
+    m := m.insert "loop_depth_max" acc.loopDepthMax
+    m := m.insert "assignments" acc.assignments
+    m := m.insert "global_reads" acc.globalReads
+    m := m.insert "global_writes" acc.globalWrites
+    m := m.insert "heap_allocations" acc.heapAllocs
+    m := m.insert "heap_frees" acc.heapFrees
+    m := m.insert "call_sites" acc.callSites
+    m := m.insert "call_qualified" acc.callQualified
+    m := m.insert "call_distinct" acc.callNames.size
+    m := m.insert "build_time_ms" buildTimeMs
+    return m
+
 @[inline] def readFileMetricMap (path : System.FilePath) (buildTimeMs : Nat) : IO MetricMap := do
   let content ← IO.FS.readFile path
   let lines := content.splitOn "\n"
   let acc := scanLines lines
-  let mut m : MetricMap := {}
-  m := m.insert "loc" acc.loc
-  m := m.insert "loc_nonempty" acc.locNonEmpty
-  m := m.insert "comment_lines" acc.commentLines
-  m := m.insert "todo" acc.todo
-  m := m.insert "fixme" acc.fixme
-  m := m.insert "porting_note" acc.portingNote
-  m := m.insert "adaptation_note" acc.adaptationNote
-  m := m.insert "nolint" acc.nolint
-  m := m.insert "size" acc.size
-  m := m.insert "if_points" acc.ifPoints
-  m := m.insert "if_depth_max" acc.ifDepthMax
-  m := m.insert "loop_depth_max" acc.loopDepthMax
-  m := m.insert "assignments" acc.assignments
-  m := m.insert "global_reads" acc.globalReads
-  m := m.insert "global_writes" acc.globalWrites
-  m := m.insert "heap_allocations" acc.heapAllocs
-  m := m.insert "heap_frees" acc.heapFrees
-  m := m.insert "call_sites" acc.callSites
-  m := m.insert "call_qualified" acc.callQualified
-  m := m.insert "call_distinct" acc.callNames.size
-  m := m.insert "build_time_ms" buildTimeMs
-  return m
+  return metricMapFromScan acc buildTimeMs
+
+@[inline] def stxSpan? (fileMap : FileMap) (filePath : System.FilePath) (stx : Syntax) : Option NodeSpan :=
+  match stx.getPos? with
+  | none => none
+  | some startPos =>
+      let endPos := stx.getTailPos?.getD startPos
+      let start := fileMap.toPosition startPos
+      let stop := fileMap.toPosition endPos
+      some {
+        file := filePath.toString
+        line := start.line
+        col := start.column
+        endLine := stop.line
+        endCol := stop.column
+      }
+
+@[inline] def sliceLines (lines : Array String) (span : NodeSpan) : List String :=
+  let startLine := if span.line == 0 then 1 else span.line
+  let endLine := if span.endLine < startLine then startLine else span.endLine
+  let startIdx := startLine - 1
+  let endIdx := endLine - 1
+  let total := lines.size
+  if total == 0 then
+    []
+  else
+    let startIdx := if startIdx >= total then total - 1 else startIdx
+    let endIdx := if endIdx >= total then total - 1 else endIdx
+    let len := endIdx + 1 - startIdx
+    (lines.toList.drop startIdx).take len
+
+@[inline] def isNamedDecl (stx : Syntax) : Bool :=
+  if !stx.isOfKind ``Lean.Parser.Command.declaration then
+    false
+  else
+    let decl := stx[1]
+    let k := decl.getKind
+    k == ``Lean.Parser.Command.abbrev ||
+    k == ``Lean.Parser.Command.definition ||
+    k == ``Lean.Parser.Command.theorem ||
+    k == ``Lean.Parser.Command.opaque ||
+    k == ``Lean.Parser.Command.axiom ||
+    k == ``Lean.Parser.Command.inductive ||
+    k == ``Lean.Parser.Command.classInductive ||
+    k == ``Lean.Parser.Command.structure
+
+@[inline] def isInstanceDecl (stx : Syntax) : Bool :=
+  stx.isOfKind ``Lean.Parser.Command.declaration &&
+  stx[1].getKind == ``Lean.Parser.Command.instance
+
+@[inline] def declNameFromCommand? (stx : Syntax) : Option Name := do
+  if isNamedDecl stx then
+    let (id, _) := expandDeclIdCore stx[1][1]
+    some id
+  else if isInstanceDecl stx then
+    let optDeclId := stx[1][3]
+    if optDeclId.isNone then none
+    else
+      let (id, _) := expandDeclIdCore optDeclId[0]
+      some id
+  else
+    none
+
+@[inline] def commandNameAndKind (stx : Syntax) : String × String :=
+  match declNameFromCommand? stx with
+  | some name => (toString name, "decl")
+  | none => (toString stx.getKind, "command")
+
+@[inline] def makeCommandNode (filePath : System.FilePath) (span : NodeSpan) (name kind : String)
+    (metrics : MetricMap) : NodeAcc :=
+  let id := s!"{filePath}:{span.line}:{span.col}:{span.endLine}:{span.endCol}:{name}"
+  { id := id
+    name := name
+    path := filePath
+    kind := kind
+    span := span
+    metrics := metrics
+    isFile := false
+    children := []
+  }
+
+partial def findCommandStx? (t : InfoTree) : Option Syntax :=
+  match t with
+  | .context _ child => findCommandStx? child
+  | .node info children =>
+      match info with
+      | .ofCommandInfo ci => some ci.stx
+      | .ofDocElabInfo di => some di.stx
+      | .ofDocInfo di => some di.stx
+      | _ =>
+          children.findSome? findCommandStx?
+  | .hole _ => none
 
 @[inline] def trimAsciiString (s : String) : String :=
   s.toSlice.trimAscii.toString
@@ -546,6 +662,10 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
 @[inline] def metricGetD (m : MetricMap) (key : String) : Nat :=
   m.getD key 0
 
+@[inline] def defaultSpan (path : System.FilePath) : NodeSpan :=
+  let pathStr := path.toString
+  { file := pathStr, line := 1, col := 1, endLine := 1, endCol := 1 }
+
 @[inline] def addDerivedMetrics (m : MetricMap) : MetricMap :=
   let commentRatio := ratioBp (metricGetD m "comment_lines") (metricGetD m "loc_nonempty")
   let ifDensity := ratioBp (metricGetD m "if_points") (metricGetD m "size")
@@ -571,15 +691,13 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
   let entries := m.toList.map (fun (k, v) => (k, num v))
   Json.mkObj entries
 
-structure NodeAcc where
-  name : String
-  path : System.FilePath
-  isFile : Bool := false
-  metrics : MetricMap := {}
-  children : List NodeAcc := []
-
 @[inline] def emptyNode (name : String) (path : System.FilePath) : NodeAcc :=
-  { name := name, path := path }
+  let pathStr := path.toString
+  { id := pathStr
+    name := name
+    path := path
+    span := defaultSpan path
+  }
 
 @[inline] def dropPrefix (pre xs : List String) : List String :=
   match pre, xs with
@@ -606,14 +724,24 @@ partial def insertNode (node : NodeAcc) (basePath : System.FilePath) (components
   let node := { node with metrics := mergeMetricMap node.metrics m }
   match components with
   | [] =>
-      { node with isFile := true, path := filePath }
+      let pathStr := filePath.toString
+      { node with
+        isFile := true
+        path := filePath
+        id := pathStr
+        span := { file := pathStr, line := 1, col := 1, endLine := 1, endCol := 1 }
+      }
   | c :: cs =>
       let childPath := basePath / c
       let children := upsertChild node.children c childPath (fun child => insertNode child childPath cs filePath m)
       { node with children := children }
 
-@[inline] def tagsJson (isFile : Bool) : Json :=
-  if isFile then
+@[inline] def tagsJson (node : NodeAcc) : Json :=
+  if node.kind == "command" then
+    Json.arr #[Json.str "command"]
+  else if node.kind == "decl" then
+    Json.arr #[Json.str "decl"]
+  else if node.isFile then
     Json.arr #[Json.str "file"]
   else
     Json.arr #[Json.str "dir"]
@@ -621,18 +749,21 @@ partial def insertNode (node : NodeAcc) (basePath : System.FilePath) (components
 partial def nodeAccToJson (node : NodeAcc) : Json :=
   let childrenJson := (node.children.map nodeAccToJson).toArray
   let pathStr := node.path.toString
+  let span := node.span
   Json.mkObj
-    [ ("id", Json.str pathStr)
-    , ("kind", Json.str "module")
+    [ ("id", Json.str node.id)
+    , ("kind", Json.str node.kind)
     , ("name", Json.str node.name)
     , ("path", Json.str pathStr)
     , ("span", Json.mkObj
-        [ ("file", Json.str pathStr)
-        , ("line", Json.num 1)
-        , ("col", Json.num 1)
+        [ ("file", Json.str span.file)
+        , ("line", Json.num span.line)
+        , ("col", Json.num span.col)
+        , ("end_line", Json.num span.endLine)
+        , ("end_col", Json.num span.endCol)
         ])
     , ("metrics", metricsJsonFrom node.metrics)
-    , ("tags", tagsJson node.isFile)
+    , ("tags", tagsJson node)
     , ("children", Json.arr childrenJson)
     ]
 
@@ -718,6 +849,15 @@ where
   | some path =>
       IO.FS.writeFile (System.FilePath.mk path) (reportToMarkdown report)
   | none => pure ()
+
+partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : NodeAcc :=
+  if node.isFile then
+    match cmds.get? node.path with
+    | some arr => { node with children := node.children ++ arr.toList }
+    | none => node
+  else
+    let children := node.children.map (fun child => attachCommandNodes child cmds)
+    { node with children := children }
 
 @[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
   let collectors ← getCollectors
@@ -870,6 +1010,33 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
     m := m.insert "infotree_doc_elab_info" acc.docElabInfos
     return m
 
+@[inline] def addCommandNodes (ref : IO.Ref (Std.HashMap System.FilePath (Array NodeAcc)))
+    (path : System.FilePath) (nodes : Array NodeAcc) : IO Unit := do
+  ref.modify (fun m =>
+    let prev := m.getD path #[]
+    m.insert path (prev ++ nodes))
+
+@[inline] def commandNodesFromInfo (filePath : System.FilePath) (inputCtx : Parser.InputContext)
+    (lines : Array String) (info : InfoState) : Array NodeAcc :=
+  Id.run do
+    let mut out : Array NodeAcc := #[]
+    for t in info.trees.toArray do
+      let tree := InfoTree.substitute t info.assignment
+      match findCommandStx? tree with
+      | none => pure ()
+      | some stx =>
+          match stxSpan? inputCtx.fileMap filePath stx with
+          | none => pure ()
+          | some span =>
+              let acc := scanLines (sliceLines lines span)
+              let textMetrics := metricMapFromScan acc 0
+              let infoMetrics := infoTreeMetricMap (countInfoTree tree {})
+              let metrics := mergeMetricMap textMetrics infoMetrics
+              let (name, kind) := commandNameAndKind stx
+              let node := makeCommandNode filePath span name kind metrics
+              out := out.push node
+    return out
+
 @[inline] def infoTreeSpecs : Array MetricSpec :=
   #[
     { key := "infotree_nodes", label := "InfoTree nodes", kind := "count", unit := "nodes", group := "infotree" },
@@ -906,6 +1073,7 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
 
 @[inline] def collectInfoTreeForFile (ctx : CollectContext) (path : System.FilePath) : IO MetricMap := do
   let content ← IO.FS.readFile path
+  let lines := content.splitOn "\n" |>.toArray
   let fileName := path.toString
   let mainModuleName ← Lean.moduleNameOfFileName path (some ctx.root)
   let opts : Options := {}
@@ -917,6 +1085,9 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
   commandState := { commandState with infoState := { commandState.infoState with enabled := true } }
   let s ← IO.processCommands inputCtx parserState commandState
   let info := s.commandState.infoState
+  if ctx.cfg.commandNodes then
+    let nodes := commandNodesFromInfo path inputCtx lines info
+    addCommandNodes ctx.commandNodesRef path nodes
   let acc := countInfoTrees info.trees info.assignment
   return infoTreeMetricMap acc
 
@@ -1036,7 +1207,8 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
   let buildTimes ← match cfg.buildLog? with
     | some path => parseBuildLog (System.FilePath.mk path)
     | none => pure {}
-  let ctx : CollectContext := { cfg := cfg, root := root, files := files, buildTimes := buildTimes }
+  let commandNodesRef ← IO.mkRef {}
+  let ctx : CollectContext := { cfg := cfg, root := root, files := files, buildTimes := buildTimes, commandNodesRef := commandNodesRef }
   let metricsByFile ← collectAllMetrics ctx
   let collectors ← getCollectors
   let specs := dedupSpecs (collectors.foldl (fun acc c => acc ++ c.specs) #[])
@@ -1045,6 +1217,8 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     let m := metricsByFile.getD p emptyMetricMap
     let comps := relativeComponents root p
     rootAcc := insertNode rootAcc root comps p m
+  let cmdMap ← commandNodesRef.get
+  rootAcc := attachCommandNodes rootAcc cmdMap
   writeReport cfg rootAcc specs generatedAt
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
@@ -1084,6 +1258,7 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     "build-log" : String; "Path to build log with timing entries (optional)"
     "profile-json" : String; "Path to trace.profiler.output JSON (optional)"
     infotree; "Collect InfoTree summary metrics (slow; requires lake env)"
+    "command-nodes"; "Emit command/decl nodes under each file (requires infotree)"
     "report-json" : String; "Write agent report JSON to path (optional)"
     "report-md" : String; "Write agent report Markdown to path (optional)"
     "report-top" : Nat; "Top N items per metric in report (default: 30)"
