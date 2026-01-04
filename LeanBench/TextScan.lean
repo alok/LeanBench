@@ -223,7 +223,8 @@ def freeSuffixes : List String := suffixesFromNames freeSuffixNames
         go rest sites qualified names
   go tokens 0 0 callNames
 
-@[inline] def lineMetrics (line : String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc × Bool :=
+@[inline] def lineMetricsWithTokens (line : String) (tokens : List String)
+    (inBlock : Bool) (acc : ScanAcc) : ScanAcc × Bool :=
   let acc := { acc with loc := acc.loc + 1 }
   let trimmed := line.trimAscii.toString
   let acc := if trimmed.isEmpty then acc else { acc with locNonEmpty := acc.locNonEmpty + 1 }
@@ -255,7 +256,6 @@ def freeSuffixes : List String := suffixesFromNames freeSuffixNames
     let ifStack := popWhile acc.ifStack (fun lvl => indent <= lvl && !keepIf)
     let loopStack := popWhile acc.loopStack (fun lvl => indent <= lvl)
     let acc := { acc with ifStack := ifStack, loopStack := loopStack }
-    let tokens := tokenizeLine lineChars
     let wordTokens := tokens.filter isWordToken
     let acc := { acc with size := acc.size + wordTokens.length }
     let ifCount := wordTokens.foldl (fun n t => if t == "if" then n + 1 else n) 0
@@ -280,6 +280,9 @@ def freeSuffixes : List String := suffixesFromNames freeSuffixNames
           callQualified := acc.callQualified + qualified
           callNames := names }
     (acc, inBlock)
+
+@[inline] def lineMetrics (line : String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc × Bool :=
+  lineMetricsWithTokens line (tokenizeLine line.toList) inBlock acc
 
 @[inline] def scanLines (lines : List String) : ScanAcc :=
   let rec go (lines : List String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc :=

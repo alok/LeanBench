@@ -161,6 +161,14 @@ def cfgParsecTokens : BenchConfig := {
   samples := 10
 }
 
+def cfgParsecScan : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "observe", "parsec", "scan"]
+  items := some scanItems
+  bytes := some scanBytes
+  samples := 10
+}
+
 bench "leanbench/json_escape_1m" (cfgJsonEscape) do
   let fixtures ← fixturesRef.get
   let out := jsonEscape fixtures.escapeInput
@@ -208,4 +216,10 @@ bench "leanbench/parsec_tokenize_200" (cfgParsecTokens) do
     let tokens := LeanBench.ParsecScan.tokenizeLineParsec line
     total := total + tokens.length
   if total == 0 then
+    IO.println ""
+
+bench "leanbench/scan_lines_200_parsec" (cfgParsecScan) do
+  let fixtures ← fixturesRef.get
+  let acc := LeanBench.ParsecScan.scanLinesParsec fixtures.scanLines
+  if acc.loc == 0 then
     IO.println ""

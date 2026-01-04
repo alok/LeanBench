@@ -30,4 +30,14 @@ namespace LeanBench.ParsecScan
   | .ok ts => ts.toList
   | .error _ => tokenizeLine line.toList
 
+@[inline] def scanLinesParsec (lines : List String) : ScanAcc :=
+  let rec go (ls : List String) (acc : ScanAcc) (inBlock : Bool) : ScanAcc :=
+    match ls with
+    | [] => acc
+    | line :: rest =>
+        let tokens := tokenizeLineParsec line
+        let (acc, inBlock) := lineMetricsWithTokens line tokens inBlock acc
+        go rest acc inBlock
+  go lines default false
+
 end LeanBench.ParsecScan
