@@ -11,6 +11,7 @@ structure ObserveConfig where
   schemaVersion : String := "0.1.0"
   sample : Bool := false
   maxFiles? : Option Nat := none
+  buildLog? : Option String := none
 
 @[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
   Id.run do
@@ -29,6 +30,9 @@ structure ObserveConfig where
     match p.flag? "max-files" with
     | some f => cfg := { cfg with maxFiles? := some (f.as! Nat) }
     | none => pure ()
+    match p.flag? "build-log" with
+    | some f => cfg := { cfg with buildLog? := some (f.as! String) }
+    | none => pure ()
     return cfg
 
 structure FileMetrics where
@@ -40,6 +44,7 @@ structure FileMetrics where
   portingNote : Nat := 0
   adaptationNote : Nat := 0
   nolint : Nat := 0
+  buildTimeMs : Nat := 0
 
 @[inline] def FileMetrics.add (a b : FileMetrics) : FileMetrics :=
   { loc := a.loc + b.loc
@@ -50,6 +55,7 @@ structure FileMetrics where
   , portingNote := a.portingNote + b.portingNote
   , adaptationNote := a.adaptationNote + b.adaptationNote
   , nolint := a.nolint + b.nolint
+  , buildTimeMs := a.buildTimeMs + b.buildTimeMs
   }
 
 @[inline] def isPrefixChars (pre s : List Char) : Bool :=
@@ -108,10 +114,96 @@ structure FileMetrics where
         go rest inBlock acc
   go lines false {}
 
-@[inline] def readFileMetrics (path : System.FilePath) : IO FileMetrics := do
+@[inline] def readFileMetrics (path : System.FilePath) (buildTimeMs : Nat) : IO FileMetrics := do
   let content ← IO.FS.readFile path
   let lines := content.splitOn "\n"
-  return scanLines lines
+  let m := scanLines lines
+  return { m with buildTimeMs := buildTimeMs }
+
+@[inline] def trimAsciiString (s : String) : String :=
+  s.toSlice.trimAscii.toString
+
+@[inline] def dropWhileChars (p : Char → Bool) (xs : List Char) : List Char :=
+  match xs with
+  | [] => []
+  | x :: xs => if p x then dropWhileChars p xs else x :: xs
+
+@[inline] def dropRightWhileChars (p : Char → Bool) (xs : List Char) : List Char :=
+  (dropWhileChars p xs.reverse).reverse
+
+@[inline] def dropRightNChars (n : Nat) (xs : List Char) : List Char :=
+  (xs.reverse.drop n).reverse
+
+@[inline] def dropRightN (s : String) (n : Nat) : String :=
+  String.ofList (dropRightNChars n s.toList)
+
+@[inline] def isDigitChar (c : Char) : Bool :=
+  c >= '0' && c <= '9'
+
+@[inline] def parseNat? (s : String) : Option Nat :=
+  if s.isEmpty then
+    none
+  else if s.toList.all isDigitChar then
+    s.toNat?
+  else
+    none
+
+@[inline] def parseMsToken? (tok : String) : Option Nat :=
+  let t := trimAsciiString tok
+  let t := String.ofList (dropRightWhileChars (fun c => c == ',' || c == ')' || c == ']') t.toList)
+  if t.endsWith "ms" then
+    parseNat? (dropRightN t 2)
+  else if t.endsWith "s" then
+    let base := dropRightN t 1
+    match base.splitOn "." with
+    | [whole] =>
+        parseNat? whole |>.map (fun n => n * 1000)
+    | [whole, frac] =>
+        match parseNat? whole with
+        | none => none
+        | some wholeNat =>
+            let fracChars := frac.toList.take 3
+            let fracDigits := fracChars.foldl (fun acc c => acc * 10 + (c.toNat - '0'.toNat)) 0
+            let scale := match fracChars.length with
+              | 0 => 1000
+              | 1 => 100
+              | 2 => 10
+              | _ => 1
+            some (wholeNat * 1000 + fracDigits * scale)
+    | _ => none
+  else
+    none
+
+@[inline] def trimPathToken (tok : String) : String :=
+  let t := trimAsciiString tok
+  let t := String.ofList (dropWhileChars (fun c => c == '"' || c == '(' || c == '[') t.toList)
+  String.ofList (dropRightWhileChars (fun c => c == '"' || c == ')' || c == ']' || c == ',' || c == ':') t.toList)
+
+@[inline] def extractLeanPath? (line : String) : Option String :=
+  let tokens := (line.splitOn " ").filter (fun s => s != "")
+  tokens.findSome? (fun t =>
+    if containsSubstr t ".lean" then
+      some (trimPathToken t)
+    else
+      none)
+
+@[inline] def extractDurationMs? (line : String) : Option Nat :=
+  let tokens := (line.splitOn " ").filter (fun s => s != "")
+  tokens.findSome? parseMsToken?
+
+@[inline] def parseBuildLog (path : System.FilePath) : IO (List (String × Nat)) := do
+  let content ← IO.FS.readFile path
+  let mut acc : List (String × Nat) := []
+  for line in content.splitOn "\n" do
+    match extractLeanPath? line, extractDurationMs? line with
+    | some p, some ms => acc := (p, ms) :: acc
+    | _, _ => pure ()
+  return acc
+
+@[inline] def findBuildTimeMs? (entries : List (String × Nat)) (path : System.FilePath) : Option Nat :=
+  let p := path.toString
+  entries.findSome? (fun (k, v) =>
+    if k.endsWith p || p.endsWith k then some v else none)
 
 @[inline] def shouldSkipDirName (name : String) : Bool :=
   name == ".git" || name == ".lake" || name == "artifacts" || name == "build" || name == ".github"
@@ -150,6 +242,7 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
     , ("porting_note", num m.portingNote)
     , ("adaptation_note", num m.adaptationNote)
     , ("nolint", num m.nolint)
+    , ("build_time_ms", num m.buildTimeMs)
     ]
 
 structure NodeAcc where
@@ -219,7 +312,7 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
 
 @[inline] def artifactJson (cfg : ObserveConfig) (generatedAt : String) : IO Json := do
   if cfg.sample then
-    let sampleMetrics : FileMetrics := { loc := 1200, locNonEmpty := 1100, commentLines := 200 }
+    let sampleMetrics : FileMetrics := { loc := 1200, locNonEmpty := 1100, commentLines := 200, buildTimeMs := 4200 }
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
     return Json.mkObj
@@ -238,9 +331,13 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
   let files := match cfg.maxFiles? with
     | some n => takeArray filesAll n
     | none => filesAll
+  let buildTimes ← match cfg.buildLog? with
+    | some path => parseBuildLog (System.FilePath.mk path)
+    | none => pure []
   let mut rootAcc := emptyNode "root" root
   for p in files do
-    let m ← readFileMetrics p
+    let buildTime := findBuildTimeMs? buildTimes p |>.getD 0
+    let m ← readFileMetrics p buildTime
     let comps := relativeComponents root p
     rootAcc := insertNode rootAcc root comps p m
   return Json.mkObj
@@ -277,6 +374,7 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
     out : String; "Output path (default: stdout)"
     "schema-version" : String; "Schema version (default: 0.1.0)"
     "max-files" : Nat; "Limit number of files scanned"
+    "build-log" : String; "Path to build log with timing entries (optional)"
     sample; "Emit sample metrics values"
 ]
 
