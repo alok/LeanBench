@@ -770,6 +770,8 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
 structure ReportItem where
   name : String
   path : String
+  line : Nat
+  col : Nat
   value : Nat
 
 structure MetricReport where
@@ -783,7 +785,9 @@ structure Report where
   metrics : List MetricReport
 
 partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
-  if node.isFile || node.children.isEmpty then
+  if node.kind == "command" || node.kind == "decl" then
+    [node]
+  else if node.children.isEmpty then
     [node]
   else
     node.children.foldl (fun acc child => acc ++ collectLeaves child) []
@@ -794,7 +798,11 @@ partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
 
 @[inline] def buildMetricReport (spec : MetricSpec) (leaves : List NodeAcc) (topN : Nat) : MetricReport :=
   let items := leaves.map (fun leaf =>
-    { name := leaf.name, path := leaf.path.toString, value := reportMetricValue leaf.metrics spec.key })
+    { name := leaf.name
+      path := leaf.path.toString
+      line := leaf.span.line
+      col := leaf.span.col
+      value := reportMetricValue leaf.metrics spec.key })
   let items := (items.toArray.qsort (fun a b => a.value > b.value)).toList
   let top := items.take topN
   { key := spec.key, label := spec.label, top := top }
@@ -808,6 +816,8 @@ partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
           Json.mkObj
             [ ("name", Json.str item.name)
             , ("path", Json.str item.path)
+            , ("line", Json.num item.line)
+            , ("col", Json.num item.col)
             , ("value", num item.value)
             ])).toArray)
       ])
@@ -823,7 +833,7 @@ partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
     r.metrics.map (fun m =>
       let items :=
         (enumerate 0 m.top).map (fun (idx, item) =>
-          s!"{idx + 1}. {item.value} — {item.path}"
+          s!"{idx + 1}. {item.value} — {item.name} ({item.path}:{item.line})"
         ) |> String.intercalate "\n"
       s!"\n## {m.label} (`{m.key}`)\n\n{items}\n"
     ) |> String.intercalate "\n"

@@ -2,6 +2,14 @@ name = "LeanBench"
 version = "0.1.0"
 defaultTargets = ["leanbench"]
 benchDriver = "leanbench"
+[leanOptions]
+pp.unicode.fun = true
+autoImplicit = true
+# prevent confusing the AI with missing identifiers misidentified as implicit arguments
+relaxedAutoImplicit = false
+linter.missingDocs = true
+doc.verso = true
+
 
 [[require]]
 name = "Cli"
