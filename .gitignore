@@ -1,2 +1,6 @@
 /.lake
 /artifacts/jonathan_blow_program_visualizer/
+/artifacts/build.log
+/artifacts/metrics.json
+/artifacts/trace-profiler.json
+/artifacts/lakefile.profile.toml

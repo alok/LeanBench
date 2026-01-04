@@ -10,8 +10,19 @@ profile_json="$out_dir/trace-profiler.json"
 build_log="$out_dir/build.log"
 metrics_json="$out_dir/metrics.json"
 
-LEANFLAGS="-Dtrace.profiler=true -Dtrace.profiler.useHeartbeats=true -Dtrace.profiler.output=$profile_json" \
-  lake build -v 2>&1 | tee "$build_log"
+lakefile_src="$(pwd)/lakefile.toml"
+tmp_lakefile="$out_dir/lakefile.profile.toml"
+cp "$lakefile_src" "$tmp_lakefile"
+cat >> "$tmp_lakefile" <<EOF2
+
+moreLeanArgs = [
+  "-Dtrace.profiler=true",
+  "-Dtrace.profiler.useHeartbeats=true",
+  "-Dtrace.profiler.output=$profile_json"
+]
+EOF2
+
+lake --file "$tmp_lakefile" build --rehash --no-cache -v 2>&1 | tee "$build_log"
 
 ./.lake/build/bin/leanobserve \
   --root "$root" \
