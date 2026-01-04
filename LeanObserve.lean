@@ -4,6 +4,7 @@ import Std
 
 open Cli
 open Lean
+open Lean.Elab
 
 structure ObserveConfig where
   root : String := "."
@@ -13,6 +14,7 @@ structure ObserveConfig where
   maxFiles? : Option Nat := none
   buildLog? : Option String := none
   profileJson? : Option String := none
+  infoTree : Bool := false
 
 @[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
   Id.run do
@@ -37,6 +39,8 @@ structure ObserveConfig where
     match p.flag? "profile-json" with
     | some f => cfg := { cfg with profileJson? := some (f.as! String) }
     | none => pure ()
+    if p.hasFlag "infotree" then
+      cfg := { cfg with infoTree := true }
     return cfg
 
 abbrev MetricKey := String
@@ -689,6 +693,155 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
 
 initialize registerCollector { id := "text-scan", specs := textScanSpecs, collect := collectTextScan }
 
+structure InfoTreeAcc where
+  nodes : Nat := 0
+  infoNodes : Nat := 0
+  contexts : Nat := 0
+  holes : Nat := 0
+  tacticInfos : Nat := 0
+  termInfos : Nat := 0
+  partialTermInfos : Nat := 0
+  commandInfos : Nat := 0
+  macroInfos : Nat := 0
+  optionInfos : Nat := 0
+  errorNameInfos : Nat := 0
+  completionInfos : Nat := 0
+  fieldInfos : Nat := 0
+  widgetInfos : Nat := 0
+  customInfos : Nat := 0
+  fvarAliasInfos : Nat := 0
+  fieldRedeclInfos : Nat := 0
+  delabTermInfos : Nat := 0
+  choiceInfos : Nat := 0
+  docInfos : Nat := 0
+  docElabInfos : Nat := 0
+
+partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
+  match t with
+  | .context _ child =>
+      let acc := { acc with nodes := acc.nodes + 1, contexts := acc.contexts + 1 }
+      countInfoTree child acc
+  | .hole _ =>
+      { acc with nodes := acc.nodes + 1, holes := acc.holes + 1 }
+  | .node info children =>
+      let acc := { acc with nodes := acc.nodes + 1, infoNodes := acc.infoNodes + 1 }
+      let acc :=
+        match info with
+        | .ofTacticInfo _ => { acc with tacticInfos := acc.tacticInfos + 1 }
+        | .ofTermInfo _ => { acc with termInfos := acc.termInfos + 1 }
+        | .ofPartialTermInfo _ => { acc with partialTermInfos := acc.partialTermInfos + 1 }
+        | .ofCommandInfo _ => { acc with commandInfos := acc.commandInfos + 1 }
+        | .ofMacroExpansionInfo _ => { acc with macroInfos := acc.macroInfos + 1 }
+        | .ofOptionInfo _ => { acc with optionInfos := acc.optionInfos + 1 }
+        | .ofErrorNameInfo _ => { acc with errorNameInfos := acc.errorNameInfos + 1 }
+        | .ofCompletionInfo _ => { acc with completionInfos := acc.completionInfos + 1 }
+        | .ofFieldInfo _ => { acc with fieldInfos := acc.fieldInfos + 1 }
+        | .ofUserWidgetInfo _ => { acc with widgetInfos := acc.widgetInfos + 1 }
+        | .ofCustomInfo _ => { acc with customInfos := acc.customInfos + 1 }
+        | .ofFVarAliasInfo _ => { acc with fvarAliasInfos := acc.fvarAliasInfos + 1 }
+        | .ofFieldRedeclInfo _ => { acc with fieldRedeclInfos := acc.fieldRedeclInfos + 1 }
+        | .ofDelabTermInfo _ => { acc with delabTermInfos := acc.delabTermInfos + 1 }
+        | .ofChoiceInfo _ => { acc with choiceInfos := acc.choiceInfos + 1 }
+        | .ofDocInfo _ => { acc with docInfos := acc.docInfos + 1 }
+        | .ofDocElabInfo _ => { acc with docElabInfos := acc.docElabInfos + 1 }
+      children.foldl (fun acc child => countInfoTree child acc) acc
+
+@[inline] def countInfoTrees (trees : PersistentArray InfoTree) (assign : PersistentHashMap MVarId InfoTree) : InfoTreeAcc :=
+  trees.foldl (fun acc t => countInfoTree (InfoTree.substitute t assign) acc) {}
+
+@[inline] def infoTreeMetricMap (acc : InfoTreeAcc) : MetricMap :=
+  Id.run do
+    let mut m : MetricMap := {}
+    m := m.insert "infotree_nodes" acc.nodes
+    m := m.insert "infotree_info_nodes" acc.infoNodes
+    m := m.insert "infotree_contexts" acc.contexts
+    m := m.insert "infotree_holes" acc.holes
+    m := m.insert "infotree_tactic_info" acc.tacticInfos
+    m := m.insert "infotree_term_info" acc.termInfos
+    m := m.insert "infotree_partial_term_info" acc.partialTermInfos
+    m := m.insert "infotree_command_info" acc.commandInfos
+    m := m.insert "infotree_macro_expansions" acc.macroInfos
+    m := m.insert "infotree_option_info" acc.optionInfos
+    m := m.insert "infotree_error_name_info" acc.errorNameInfos
+    m := m.insert "infotree_completion_info" acc.completionInfos
+    m := m.insert "infotree_field_info" acc.fieldInfos
+    m := m.insert "infotree_user_widgets" acc.widgetInfos
+    m := m.insert "infotree_custom_info" acc.customInfos
+    m := m.insert "infotree_fvar_alias_info" acc.fvarAliasInfos
+    m := m.insert "infotree_field_redecl_info" acc.fieldRedeclInfos
+    m := m.insert "infotree_delab_term_info" acc.delabTermInfos
+    m := m.insert "infotree_choice_info" acc.choiceInfos
+    m := m.insert "infotree_doc_info" acc.docInfos
+    m := m.insert "infotree_doc_elab_info" acc.docElabInfos
+    return m
+
+@[inline] def infoTreeSpecs : Array MetricSpec :=
+  #[
+    { key := "infotree_nodes", label := "InfoTree nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_info_nodes", label := "InfoTree info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_contexts", label := "InfoTree contexts", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_holes", label := "InfoTree holes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_tactic_info", label := "Tactic info nodes", kind := "count", unit := "nodes", group := "infotree",
+      defaultBlendWeight := 30 },
+    { key := "infotree_term_info", label := "Term info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_partial_term_info", label := "Partial term info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_command_info", label := "Command info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_macro_expansions", label := "Macro expansions", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_option_info", label := "Option info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_error_name_info", label := "Error name nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_completion_info", label := "Completion info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_field_info", label := "Field info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_user_widgets", label := "User widgets", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_custom_info", label := "Custom info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_fvar_alias_info", label := "FVar alias nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_field_redecl_info", label := "Field redecl nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_delab_term_info", label := "Delab term nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_choice_info", label := "Choice info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_doc_info", label := "Doc info nodes", kind := "count", unit := "nodes", group := "infotree" },
+    { key := "infotree_doc_elab_info", label := "Doc elab info nodes", kind := "count", unit := "nodes", group := "infotree" }
+  ]
+
+initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
+
+@[inline] def ensureSearchPath : IO Unit := do
+  let initialized ← searchPathInitRef.get
+  if !initialized then
+    Lean.initSearchPath (← Lean.findSysroot)
+    searchPathInitRef.set true
+
+@[inline] def collectInfoTreeForFile (ctx : CollectContext) (path : System.FilePath) : IO MetricMap := do
+  let content ← IO.FS.readFile path
+  let fileName := path.toString
+  let mainModuleName ← Lean.moduleNameOfFileName path (some ctx.root)
+  let opts : Options := {}
+  let inputCtx := Parser.mkInputContext content fileName
+  let (header, parserState, messages) ← Parser.parseHeader inputCtx
+  let (env, messages) ← Elab.processHeader (leakEnv := true) header opts messages inputCtx
+  let env := env.setMainModule mainModuleName
+  let mut commandState := Elab.Command.mkState env messages opts
+  commandState := { commandState with infoState := { commandState.infoState with enabled := true } }
+  let s ← IO.processCommands inputCtx parserState commandState
+  let info := s.commandState.infoState
+  let acc := countInfoTrees info.trees info.assignment
+  return infoTreeMetricMap acc
+
+@[inline] def collectInfoTree (ctx : CollectContext) : IO MetricByFile := do
+  if !ctx.cfg.infoTree then
+    return {}
+  ensureSearchPath
+  let mut acc : MetricByFile := {}
+  for p in ctx.files do
+    let m ←
+      try
+        collectInfoTreeForFile ctx p
+      catch e =>
+        IO.eprintln s!"infotree: {p}: {e}"
+        pure emptyMetricMap
+    acc := acc.insert p m
+  return acc
+
+initialize registerCollector { id := "infotree", specs := infoTreeSpecs, collect := collectInfoTree }
+
 @[inline] def distributeProfilerWeight (ctx : CollectContext) (total : Float) : MetricByFile :=
   Id.run do
     let files := ctx.files
@@ -742,10 +895,31 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     sampleMetrics := sampleMetrics.insert "call_qualified" 40
     sampleMetrics := sampleMetrics.insert "call_distinct" 80
     sampleMetrics := sampleMetrics.insert "build_time_ms" 4200
+    sampleMetrics := sampleMetrics.insert "infotree_nodes" 32000
+    sampleMetrics := sampleMetrics.insert "infotree_info_nodes" 21000
+    sampleMetrics := sampleMetrics.insert "infotree_contexts" 6200
+    sampleMetrics := sampleMetrics.insert "infotree_holes" 140
+    sampleMetrics := sampleMetrics.insert "infotree_tactic_info" 900
+    sampleMetrics := sampleMetrics.insert "infotree_term_info" 12000
+    sampleMetrics := sampleMetrics.insert "infotree_partial_term_info" 400
+    sampleMetrics := sampleMetrics.insert "infotree_command_info" 800
+    sampleMetrics := sampleMetrics.insert "infotree_macro_expansions" 1200
+    sampleMetrics := sampleMetrics.insert "infotree_option_info" 30
+    sampleMetrics := sampleMetrics.insert "infotree_error_name_info" 8
+    sampleMetrics := sampleMetrics.insert "infotree_completion_info" 5
+    sampleMetrics := sampleMetrics.insert "infotree_field_info" 60
+    sampleMetrics := sampleMetrics.insert "infotree_user_widgets" 10
+    sampleMetrics := sampleMetrics.insert "infotree_custom_info" 25
+    sampleMetrics := sampleMetrics.insert "infotree_fvar_alias_info" 200
+    sampleMetrics := sampleMetrics.insert "infotree_field_redecl_info" 2
+    sampleMetrics := sampleMetrics.insert "infotree_delab_term_info" 40
+    sampleMetrics := sampleMetrics.insert "infotree_choice_info" 16
+    sampleMetrics := sampleMetrics.insert "infotree_doc_info" 12
+    sampleMetrics := sampleMetrics.insert "infotree_doc_elab_info" 18
     sampleMetrics := sampleMetrics.insert "profile_weight" 1800
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
-    let specs := dedupSpecs (textScanSpecs ++ profileSpecs)
+    let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs)
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -812,6 +986,7 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     "max-files" : Nat; "Limit number of files scanned"
     "build-log" : String; "Path to build log with timing entries (optional)"
     "profile-json" : String; "Path to trace.profiler.output JSON (optional)"
+    infotree; "Collect InfoTree summary metrics (slow; requires lake env)"
     sample; "Emit sample metrics values"
 ]
 

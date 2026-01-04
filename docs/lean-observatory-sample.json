@@ -12,6 +12,8 @@
     { "key": "size", "label": "Size (tokens)", "kind": "count", "unit": "tokens", "description": "", "group": "structure", "default_blend_weight": 0 },
     { "key": "if_density_bp", "label": "If density", "kind": "ratio_bp", "unit": "bp", "description": "", "group": "complexity", "default_blend_weight": 20 },
     { "key": "heap_allocations", "label": "Heap allocations (heuristic)", "kind": "count", "unit": "count", "description": "", "group": "perf", "default_blend_weight": 30 },
+    { "key": "infotree_nodes", "label": "InfoTree nodes", "kind": "count", "unit": "nodes", "description": "", "group": "infotree", "default_blend_weight": 0 },
+    { "key": "infotree_tactic_info", "label": "Tactic info nodes", "kind": "count", "unit": "nodes", "description": "", "group": "infotree", "default_blend_weight": 30 },
     { "key": "build_time_ms", "label": "Build time", "kind": "time_ms", "unit": "ms", "description": "", "group": "build", "default_blend_weight": 0 },
     { "key": "profile_weight", "label": "Profile weight", "kind": "weight", "unit": "ticks", "description": "", "group": "profile", "default_blend_weight": 20 }
   ],
@@ -29,6 +31,8 @@
       "if_points": 42,
       "if_density_bp": 46,
       "heap_allocations": 18,
+      "infotree_nodes": 32000,
+      "infotree_tactic_info": 900,
       "build_time_ms": 4200,
       "profile_weight": 1800
     },
@@ -46,6 +50,8 @@
           "if_points": 8,
           "if_density_bp": 38,
           "heap_allocations": 6,
+          "infotree_nodes": 6200,
+          "infotree_tactic_info": 120,
           "build_time_ms": 820,
           "profile_weight": 400
         },

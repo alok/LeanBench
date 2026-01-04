@@ -119,8 +119,12 @@ Phase 0 (cheap):
 - parse `lake build -v`
 
 Phase 1 (InfoTree summary):
-- export compact per-decl summary only
-- cache by file hash
+- export compact per-file summary (implemented in `leanobserve --infotree`)
+- per-decl summary and cache by file hash (next)
+
+Usage note:
+- Run `leanobserve` under `lake env` so `LEAN_PATH` is set for imports, e.g.
+  `lake env ./.lake/build/bin/leanobserve --root . --out artifacts/metrics.json --infotree`
 
 Phase 2 (profiling/tracing):
 - enable `trace.profiler` globally (lakefile or wrapper)
