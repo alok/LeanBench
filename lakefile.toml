@@ -14,3 +14,7 @@ name = "LeanBench"
 [[lean_exe]]
 name = "leanbench"
 root = "Main"
+
+[[lean_exe]]
+name = "leanobserve"
+root = "LeanObserve"

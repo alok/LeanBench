@@ -1,0 +1,49 @@
+{
+  "schema_version": "0.1.0",
+  "generated_at": "2026-01-04T00:00:00Z",
+  "project": {
+    "name": "LeanProject",
+    "root": ".",
+    "commit": "",
+    "tool": "leanobserve"
+  },
+  "root": {
+    "id": "root",
+    "kind": "module",
+    "name": "root",
+    "path": ".",
+    "span": { "file": "", "line": 1, "col": 1 },
+    "metrics": { "loc": 0, "expr_nodes": 0 },
+    "tags": [],
+    "children": [
+      {
+        "id": "Mathlib/Algebra/Group/Defs.lean",
+        "kind": "module",
+        "name": "Mathlib.Algebra.Group.Defs",
+        "path": "Mathlib/Algebra/Group/Defs.lean",
+        "span": { "file": "Mathlib/Algebra/Group/Defs.lean", "line": 1, "col": 1 },
+        "metrics": { "loc": 1200, "expr_nodes": 25000, "elab_time_ms": 4200 },
+        "tags": ["module"],
+        "children": [
+          {
+            "id": "Mathlib/Algebra/Group/Defs.lean#mul_assoc",
+            "kind": "decl",
+            "name": "mul_assoc",
+            "path": "Mathlib/Algebra/Group/Defs.lean",
+            "span": { "file": "Mathlib/Algebra/Group/Defs.lean", "line": 123, "col": 4 },
+            "metrics": {
+              "loc": 18,
+              "expr_nodes": 290,
+              "infotree_nodes": 1200,
+              "elab_time_ms": 12.3,
+              "heartbeats": 145000,
+              "tactic_calls": 24
+            },
+            "tags": ["theorem"],
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

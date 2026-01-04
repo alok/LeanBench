@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/lean-observatory.schema.json",
+  "title": "Lean Observatory Metrics",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "root"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "root": { "type": "string" },
+        "commit": { "type": "string" },
+        "tool": { "type": "string" }
+      }
+    },
+    "root": { "$ref": "#/$defs/node" }
+  },
+  "$defs": {
+    "span": {
+      "type": "object",
+      "required": ["file", "line", "col"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "end_col": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "name", "path", "span", "children", "metrics"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["module", "command", "decl"] },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "span": { "$ref": "#/$defs/span" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "metrics": { "$ref": "#/$defs/metrics" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
