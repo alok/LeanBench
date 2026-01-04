@@ -61,6 +61,10 @@ LEANFLAGS="-Dtrace.profiler=true -Dtrace.profiler.useHeartbeats=true -Dtrace.pro
   --profile-json artifacts/trace-profiler.json \\
   --out artifacts/metrics.json
 ```
+Convenience wrapper:
+```
+./scripts/leanobserve_profile.sh . artifacts
+```
 Notes:
 - `profile_weight` is currently distributed across files in proportion to `build_time_ms`.
 - For more precise attribution, we’ll move to InfoTree and compiler hooks in the next phase.
