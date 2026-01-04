@@ -143,6 +143,14 @@ body {
 
 .panel {
   padding: 24px 32px 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+.canvas {
+  position: relative;
 }
 
 #treemap {
@@ -152,6 +160,115 @@ body {
   min-height: 65vh;
   position: relative;
   overflow: hidden;
+}
+
+.inspector {
+  display: grid;
+  gap: 16px;
+}
+
+.inspector-card {
+  background: rgba(20, 28, 36, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 14px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.inspector-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inspector-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.top-list {
+  display: grid;
+  gap: 8px;
+  max-height: 48vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.top-item {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(29, 39, 51, 0.8);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border 0.15s ease, transform 0.15s ease;
+}
+
+.top-item:hover {
+  border-color: rgba(255, 122, 89, 0.6);
+  transform: translateY(-1px);
+}
+
+.top-rank {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.top-name {
+  font-size: 13px;
+}
+
+.top-path {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.top-value {
+  font-size: 12px;
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+
+.detail-body {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.detail-path {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.detail-metrics {
+  display: grid;
+  gap: 6px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.detail-row span {
+  color: var(--muted);
 }
 
 .tooltip {
@@ -185,5 +302,10 @@ body {
 
   .panel {
     padding: 20px;
+    grid-template-columns: 1fr;
+  }
+
+  .top-list {
+    max-height: none;
   }
 }

@@ -44,8 +44,30 @@
     </header>
 
     <main class="panel">
-      <div id="treemap"></div>
-      <div id="tooltip" class="tooltip" hidden></div>
+      <section class="canvas">
+        <div id="treemap"></div>
+        <div id="tooltip" class="tooltip" hidden></div>
+      </section>
+      <aside class="inspector">
+        <div class="inspector-card">
+          <div class="inspector-title">Top Nodes</div>
+          <div class="inspector-controls">
+            <label class="control">
+              <span>List Metric</span>
+              <select id="listSelect"></select>
+            </label>
+            <label class="control">
+              <span>Count</span>
+              <input id="listCount" type="number" min="5" max="200" value="30" />
+            </label>
+          </div>
+          <div id="topList" class="top-list"></div>
+        </div>
+        <div class="inspector-card">
+          <div class="inspector-title">Details</div>
+          <div id="detailBody" class="detail-body">Hover a tile to inspect metrics.</div>
+        </div>
+      </aside>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
