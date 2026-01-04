@@ -45,9 +45,25 @@ The emphasis is on:
 
 ## Compiler Hook Path (planned)
 - Short term: run `lake build` with `-Dtrace.profiler=true` and `-Dtrace.profiler.useHeartbeats=true`,
-  capture `trace.profiler.output` (Firefox profiler JSON), and aggregate per-file heartbeats.
+  capture `trace.profiler.output` (Firefox profiler JSON), and aggregate per-file heartbeats by
+  distributing total profiler weight across files using build times.
 - Mid term: instrument the frontend with an InfoTree visitor to collect decl-level metrics at compile time.
 - Long term: use compiler internals (Environment + Kernel) for precise dependency and term-size metrics.
+
+### Profiler run (current)
+```
+LEANFLAGS="-Dtrace.profiler=true -Dtrace.profiler.useHeartbeats=true -Dtrace.profiler.output=artifacts/trace-profiler.json" \\
+  lake build -v 2>&1 | tee artifacts/build.log
+
+./.lake/build/bin/leanobserve \\
+  --root . \\
+  --build-log artifacts/build.log \\
+  --profile-json artifacts/trace-profiler.json \\
+  --out artifacts/metrics.json
+```
+Notes:
+- `profile_weight` is currently distributed across files in proportion to `build_time_ms`.
+- For more precise attribution, we’ll move to InfoTree and compiler hooks in the next phase.
 
 ## Data Model (schema sketch)
 Each node is a module/command/decl with metrics and source span.

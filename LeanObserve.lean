@@ -12,6 +12,7 @@ structure ObserveConfig where
   sample : Bool := false
   maxFiles? : Option Nat := none
   buildLog? : Option String := none
+  profileJson? : Option String := none
 
 @[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
   Id.run do
@@ -32,6 +33,9 @@ structure ObserveConfig where
     | none => pure ()
     match p.flag? "build-log" with
     | some f => cfg := { cfg with buildLog? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "profile-json" with
+    | some f => cfg := { cfg with profileJson? := some (f.as! String) }
     | none => pure ()
     return cfg
 
@@ -436,6 +440,59 @@ def defLinePrefixes : List String :=
     | _, _ => pure ()
   return acc
 
+@[inline] def jsonGetObj? (j : Json) : Option (Std.TreeMap.Raw String Json compare) :=
+  match j with
+  | .obj kv => some kv
+  | _ => none
+
+@[inline] def jsonGetArr? (j : Json) : Option (Array Json) :=
+  match j with
+  | .arr xs => some xs
+  | _ => none
+
+@[inline] def jsonGetNum? (j : Json) : Option Float :=
+  match j with
+  | .num n => some n.toFloat
+  | _ => none
+
+@[inline] def jsonGetField? (obj : Std.TreeMap.Raw String Json compare) (key : String) : Option Json :=
+  obj.get? key
+
+@[inline] def listGet? (xs : List α) (idx : Nat) : Option α :=
+  match xs, idx with
+  | [], _ => none
+  | x :: _, 0 => some x
+  | _ :: xs, n + 1 => listGet? xs n
+
+@[inline] def arrayGet? (xs : Array α) (idx : Nat) : Option α :=
+  listGet? xs.toList idx
+
+@[inline] def sumJsonNumbers (arr : Array Json) : Float :=
+  arr.foldl (fun acc j => acc + (jsonGetNum? j |>.getD 0.0)) 0.0
+
+@[inline] def extractProfilerWeight (j : Json) : Float :=
+  match jsonGetObj? j with
+  | none => 0.0
+  | some obj =>
+      match jsonGetField? obj "threads" >>= jsonGetArr? with
+      | none => 0.0
+      | some threads =>
+          match arrayGet? threads 0 with
+          | none => 0.0
+          | some thread =>
+              match jsonGetObj? thread with
+              | none => 0.0
+              | some threadObj =>
+                  match jsonGetField? threadObj "samples" >>= jsonGetObj? with
+                  | none => 0.0
+                  | some samplesObj =>
+                      match jsonGetField? samplesObj "weight" >>= jsonGetArr? with
+                      | none => 0.0
+                      | some weights => sumJsonNumbers weights
+
+@[inline] def floatToNat (f : Float) : Nat :=
+  if f <= 0.0 then 0 else (Float.toUInt64 f).toNat
+
 @[inline] def findBuildTimeMs (entries : Std.HashMap String Nat) (path : System.FilePath) : Nat :=
   let p := path.toString
   match entries.get? p with
@@ -616,6 +673,12 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
     { key := "build_time_ms", label := "Build time", kind := "time_ms", unit := "ms", group := "build" }
   ]
 
+@[inline] def profileSpecs : Array MetricSpec :=
+  #[
+    { key := "profile_weight", label := "Profile weight", kind := "weight", unit := "ticks", group := "profile",
+      defaultBlendWeight := 20 }
+  ]
+
 @[inline] def collectTextScan (ctx : CollectContext) : IO MetricByFile := do
   let mut acc : MetricByFile := {}
   for p in ctx.files do
@@ -625,6 +688,40 @@ partial def nodeAccToJson (node : NodeAcc) : Json :=
   return acc
 
 initialize registerCollector { id := "text-scan", specs := textScanSpecs, collect := collectTextScan }
+
+@[inline] def distributeProfilerWeight (ctx : CollectContext) (total : Float) : MetricByFile :=
+  Id.run do
+    let files := ctx.files
+    if files.isEmpty then
+      return {}
+    let totalBuild : Nat := files.foldl (fun acc p => acc + findBuildTimeMs ctx.buildTimes p) 0
+    let totalBuildF := Float.ofNat totalBuild
+    let nF := Float.ofNat files.size
+    let mut out : MetricByFile := {}
+    for p in files do
+      let build := findBuildTimeMs ctx.buildTimes p
+      let weight :=
+        if totalBuild == 0 then
+          total / nF
+        else
+          total * (Float.ofNat build) / totalBuildF
+      let mut m : MetricMap := {}
+      m := m.insert "profile_weight" (floatToNat weight)
+      out := out.insert p m
+    return out
+
+@[inline] def collectProfiler (ctx : CollectContext) : IO MetricByFile := do
+  match ctx.cfg.profileJson? with
+  | none => pure {}
+  | some path =>
+      let content ← IO.FS.readFile path
+      match Json.parse content with
+      | .error _ => pure {}
+      | .ok j =>
+          let total := extractProfilerWeight j
+          return distributeProfilerWeight ctx total
+
+initialize registerCollector { id := "profiler", specs := profileSpecs, collect := collectProfiler }
 
 @[inline] def artifactJson (cfg : ObserveConfig) (generatedAt : String) : IO Json := do
   if cfg.sample then
@@ -645,9 +742,10 @@ initialize registerCollector { id := "text-scan", specs := textScanSpecs, collec
     sampleMetrics := sampleMetrics.insert "call_qualified" 40
     sampleMetrics := sampleMetrics.insert "call_distinct" 80
     sampleMetrics := sampleMetrics.insert "build_time_ms" 4200
+    sampleMetrics := sampleMetrics.insert "profile_weight" 1800
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
-    let specs := dedupSpecs textScanSpecs
+    let specs := dedupSpecs (textScanSpecs ++ profileSpecs)
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -713,6 +811,7 @@ initialize registerCollector { id := "text-scan", specs := textScanSpecs, collec
     "schema-version" : String; "Schema version (default: 0.1.0)"
     "max-files" : Nat; "Limit number of files scanned"
     "build-log" : String; "Path to build log with timing entries (optional)"
+    "profile-json" : String; "Path to trace.profiler.output JSON (optional)"
     sample; "Emit sample metrics values"
 ]
 
