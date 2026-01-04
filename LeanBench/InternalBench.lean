@@ -4,6 +4,7 @@ import LeanBench
 import LeanBench.Runner
 import LeanBench.Plan
 import LeanBench.Json
+import LeanBench.TextScan
 
 open LeanBench
 
@@ -52,6 +53,10 @@ structure BenchFixtures where
   results : Array BenchResult
   planCore : PlanCore
   escapeInput : String
+  scanLine : String
+  scanLines : List String
+  parseInput : String
+  parseLoops : Nat
   deriving Inhabited
 
 def buildFixtures : BenchFixtures := Id.run do
@@ -76,7 +81,20 @@ def buildFixtures : BenchFixtures := Id.run do
     chars := chars.push '\t'
     chars := chars.push 'a'
   let escapeInput := String.ofList chars.toList
-  return { results := results, planCore := planCore, escapeInput := escapeInput }
+  let scanLine :=
+    "  if foo then bar := baz -- TODO porting note #adaptation_note nolint"
+  let scanLines := List.replicate 200 scanLine
+  let parseInput := "123456789012345"
+  let parseLoops := 50000
+  return {
+    results := results,
+    planCore := planCore,
+    escapeInput := escapeInput,
+    scanLine := scanLine,
+    scanLines := scanLines,
+    parseInput := parseInput,
+    parseLoops := parseLoops
+  }
 
 def fixturesForConfig : BenchFixtures := buildFixtures
 
@@ -86,6 +104,10 @@ def escapeBytes : Nat := fixturesForConfig.escapeInput.length
 def prettyBytes : Nat := (renderPrettyTable fixturesForConfig.results none false).length
 def jsonBytes : Nat := (renderJson fixturesForConfig.results).length
 def planBytes : Nat := (renderPlanCoreJson fixturesForConfig.planCore).length
+def scanItems : Nat := fixturesForConfig.scanLines.length
+def scanBytes : Nat := fixturesForConfig.scanLines.foldl (fun acc line => acc + line.length) 0
+def parseItems : Nat := fixturesForConfig.parseLoops
+def parseBytes : Nat := fixturesForConfig.parseLoops * fixturesForConfig.parseInput.length
 
 def cfgJsonEscape : BenchConfig := {
   suite := some "leanbench"
@@ -114,6 +136,22 @@ def cfgPlanRender : BenchConfig := {
   bytes := some planBytes
 }
 
+def cfgScanLines : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "observe", "scan"]
+  items := some scanItems
+  bytes := some scanBytes
+  samples := 10
+}
+
+def cfgParseNat : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "observe", "parse"]
+  items := some parseItems
+  bytes := some parseBytes
+  samples := 10
+}
+
 bench "leanbench/json_escape_1m" (cfgJsonEscape) do
   let fixtures ← fixturesRef.get
   let out := jsonEscape fixtures.escapeInput
@@ -136,4 +174,20 @@ bench "leanbench/render_plan_500" (cfgPlanRender) do
   let fixtures ← fixturesRef.get
   let out := renderPlanCoreJson fixtures.planCore
   if out.length == 0 then
+    IO.println ""
+
+bench "leanbench/scan_lines_200" (cfgScanLines) do
+  let fixtures ← fixturesRef.get
+  let acc := scanLines fixtures.scanLines
+  if acc.loc == 0 then
+    IO.println ""
+
+bench "leanbench/parse_nat_50000" (cfgParseNat) do
+  let fixtures ← fixturesRef.get
+  let mut sum := 0
+  for _ in [0:fixtures.parseLoops] do
+    match parseNat? fixtures.parseInput with
+    | some n => sum := sum + n
+    | none => pure ()
+  if sum == 0 then
     IO.println ""
