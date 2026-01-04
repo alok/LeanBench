@@ -5,6 +5,7 @@ import LeanBench.Runner
 import LeanBench.Plan
 import LeanBench.Json
 import LeanBench.TextScan
+import LeanBench.ParsecScan
 
 open LeanBench
 
@@ -152,6 +153,14 @@ def cfgParseNat : BenchConfig := {
   samples := 10
 }
 
+def cfgParsecTokens : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "observe", "parsec"]
+  items := some scanItems
+  bytes := some scanBytes
+  samples := 10
+}
+
 bench "leanbench/json_escape_1m" (cfgJsonEscape) do
   let fixtures ← fixturesRef.get
   let out := jsonEscape fixtures.escapeInput
@@ -190,4 +199,13 @@ bench "leanbench/parse_nat_50000" (cfgParseNat) do
     | some n => sum := sum + n
     | none => pure ()
   if sum == 0 then
+    IO.println ""
+
+bench "leanbench/parsec_tokenize_200" (cfgParsecTokens) do
+  let fixtures ← fixturesRef.get
+  let mut total := 0
+  for line in fixtures.scanLines do
+    let tokens := LeanBench.ParsecScan.tokenizeLineParsec line
+    total := total + tokens.length
+  if total == 0 then
     IO.println ""

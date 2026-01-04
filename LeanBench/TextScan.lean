@@ -1,4 +1,5 @@
 import Std
+import Lean
 
 
 abbrev MetricKey := String
@@ -165,22 +166,25 @@ def nolintNeedle : List Char := "nolint".toList
 def blockStartNeedle : List Char := "/-".toList
 def blockEndNeedle : List Char := "-/".toList
 
-def suffixesFromNames (names : List Name) : List String :=
+def simpleName (s : String) : Lean.Name :=
+  Lean.Name.str Lean.Name.anonymous s
+
+def suffixesFromNames (names : List Lean.Name) : List String :=
   names.map (fun name => s!".{name.toString}")
 
-def readSuffixNames : List Name :=
-  [Name.mkSimple "get", Name.mkSimple "get!", Name.mkSimple "getD",
-   Name.mkSimple "get?", Name.mkSimple "read", Name.mkSimple "read?"]
-def writeSuffixNames : List Name :=
-  [Name.mkSimple "set", Name.mkSimple "set!", Name.mkSimple "modify",
-   Name.mkSimple "write", Name.mkSimple "write?"]
-def allocSuffixNames : List Name :=
-  [Name.mkSimple "mkRef", Name.mkSimple "mkArray", Name.mkSimple "mkEmpty",
-   Name.mkSimple "empty", Name.mkSimple "singleton", Name.mkSimple "push"]
-def freeSuffixNames : List Name :=
-  [Name.mkSimple "clear", Name.mkSimple "erase", Name.mkSimple "eraseD",
-   Name.mkSimple "pop", Name.mkSimple "pop?", Name.mkSimple "reset",
-   Name.mkSimple "shrink", Name.mkSimple "release", Name.mkSimple "dispose"]
+def readSuffixNames : List Lean.Name :=
+  [simpleName "get", simpleName "get!", simpleName "getD",
+   simpleName "get?", simpleName "read", simpleName "read?"]
+def writeSuffixNames : List Lean.Name :=
+  [simpleName "set", simpleName "set!", simpleName "modify",
+   simpleName "write", simpleName "write?"]
+def allocSuffixNames : List Lean.Name :=
+  [simpleName "mkRef", simpleName "mkArray", simpleName "mkEmpty",
+   simpleName "empty", simpleName "singleton", simpleName "push"]
+def freeSuffixNames : List Lean.Name :=
+  [simpleName "clear", simpleName "erase", simpleName "eraseD",
+   simpleName "pop", simpleName "pop?", simpleName "reset",
+   simpleName "shrink", simpleName "release", simpleName "dispose"]
 
 def readSuffixes : List String := suffixesFromNames readSuffixNames
 def writeSuffixes : List String := suffixesFromNames writeSuffixNames
