@@ -2,7 +2,9 @@
 /artifacts/jonathan_blow_program_visualizer/
 /artifacts/build.log
 /artifacts/metrics.json
+/artifacts/metrics-*.json
 /artifacts/trace-profiler.json
 /artifacts/lakefile.profile.toml
 /artifacts/report.json
 /artifacts/report.md
+/artifacts/treemap-*.png
