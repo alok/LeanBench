@@ -36,3 +36,10 @@ You can pass extra bench args via `LEANBENCH_ARGS`, e.g.
 LEANBENCH_ARGS="--suite leanbench --samples 5" \
   scripts/radar/leanbench.sh /path/to/LeanBench /tmp/radar.jsonl
 ```
+
+For the LeanObserve end-to-end suite:
+
+```bash
+LEANBENCH_ARGS="--suite observe --samples 2" \
+  scripts/radar/leanbench.sh /path/to/LeanBench /tmp/radar.jsonl
+```

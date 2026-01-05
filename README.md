@@ -107,6 +107,9 @@ collection.
 lake exe leanbench --suite observe
 ```
 
+The observe benches import `LeanObserve` directly (no subprocess), so they
+exercise the in-process API as well as the CLI.
+
 ## Suites
 
 Attach a suite directly in `BenchConfig`, or define a suite driver that
