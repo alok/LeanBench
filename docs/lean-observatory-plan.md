@@ -128,7 +128,7 @@ Usage note:
 
 Agent loop:
 - `./scripts/observe_agent_loop.sh . artifacts infotree` generates metrics + report and starts a local server.
-- `--command-nodes` emits per-command/decl nodes under each file (requires infotree; enabled by default with `--infotree`).
+- `--command-nodes` emits per-command/decl nodes under each file (requires `--infotree`).
 
 Phase 2 (profiling/tracing):
 - enable `trace.profiler` globally (lakefile or wrapper)

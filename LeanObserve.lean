@@ -46,7 +46,7 @@ structure ObserveConfig where
     | some f => cfg := { cfg with profileJson? := some (f.as! String) }
     | none => pure ()
     if p.hasFlag "infotree" then
-      cfg := { cfg with infoTree := true, commandNodes := true }
+      cfg := { cfg with infoTree := true }
     if p.hasFlag "command-nodes" then
       cfg := { cfg with commandNodes := true }
     match p.flag? "report-json" with
@@ -926,8 +926,11 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
         | .ofDocElabInfo _ => { acc with docElabInfos := acc.docElabInfos + 1 }
       children.foldl (fun acc child => countInfoTree child acc) acc
 
-@[inline] def countInfoTrees (trees : PersistentArray InfoTree) (assign : PersistentHashMap MVarId InfoTree) : InfoTreeAcc :=
-  trees.foldl (fun acc t => countInfoTree (InfoTree.substitute t assign) acc) {}
+@[inline] def substituteInfoTrees (info : InfoState) : Array InfoTree :=
+  info.trees.toArray.map (fun t => InfoTree.substitute t info.assignment)
+
+@[inline] def countInfoTreesArray (trees : Array InfoTree) : InfoTreeAcc :=
+  trees.foldl (fun acc t => countInfoTree t acc) {}
 
 @[inline] def infoTreeMetricMap (acc : InfoTreeAcc) : MetricMap :=
   Id.run do
@@ -961,12 +964,11 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
     let prev := m.getD path #[]
     m.insert path (prev ++ nodes))
 
-@[inline] def commandNodesFromInfo (filePath : System.FilePath) (inputCtx : Parser.InputContext)
-    (lines : Array String) (info : InfoState) : Array NodeAcc :=
+@[inline] def commandNodesFromTrees (filePath : System.FilePath) (inputCtx : Parser.InputContext)
+    (lines : Array String) (trees : Array InfoTree) : Array NodeAcc :=
   Id.run do
     let mut out : Array NodeAcc := #[]
-    for t in info.trees.toArray do
-      let tree := InfoTree.substitute t info.assignment
+    for tree in trees do
       match findCommandStx? tree with
       | none => pure ()
       | some stx =>
@@ -1028,13 +1030,14 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
   let env := env.setMainModule mainModuleName
   let mut commandState := Elab.Command.mkState env messages opts
   commandState := { commandState with infoState := { commandState.infoState with enabled := true } }
-  let s ← IO.processCommands inputCtx parserState commandState
-  let info := s.commandState.infoState
-  if ctx.cfg.commandNodes then
-    let nodes := commandNodesFromInfo path inputCtx lines info
-    addCommandNodes ctx.commandNodesRef path nodes
-  let acc := countInfoTrees info.trees info.assignment
-  return infoTreeMetricMap acc
+    let s ← IO.processCommands inputCtx parserState commandState
+    let info := s.commandState.infoState
+    let trees := substituteInfoTrees info
+    if ctx.cfg.commandNodes then
+      let nodes := commandNodesFromTrees path inputCtx lines trees
+      addCommandNodes ctx.commandNodesRef path nodes
+    let acc := countInfoTreesArray trees
+    return infoTreeMetricMap acc
 
 @[inline] def collectInfoTree (ctx : CollectContext) : IO MetricByFile := do
   if !ctx.cfg.infoTree then

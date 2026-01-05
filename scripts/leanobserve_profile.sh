@@ -30,6 +30,7 @@ lake build leanobserve
 ./.lake/build/bin/leanobserve \
   --root "$root" \
   --infotree \
+  --command-nodes \
   --build-log "$build_log" \
   --profile-json "$profile_json" \
   --out "$metrics_json" \
