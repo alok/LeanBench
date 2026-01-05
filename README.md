@@ -110,6 +110,10 @@ lake exe leanbench --suite observe
 The observe benches import `LeanObserve` directly (no subprocess), so they
 exercise the in-process API as well as the CLI.
 
+LeanObserve CLI:
+- `--command-nodes` includes all commands (including non-decls).
+- `--decl-nodes` includes only named declarations (implies `--command-nodes`).
+
 ## Suites
 
 Attach a suite directly in `BenchConfig`, or define a suite driver that

@@ -19,6 +19,7 @@ structure ObserveConfig where
   infoTree : Bool := false
   infoTreeJobs : Nat := 1
   commandNodes : Bool := false
+  declNodesOnly : Bool := false
   reportJson? : Option String := none
   reportMd? : Option String := none
   reportTop : Nat := 30
@@ -53,6 +54,8 @@ structure ObserveConfig where
     | none => pure ()
     if p.hasFlag "command-nodes" then
       cfg := { cfg with commandNodes := true }
+    if p.hasFlag "decl-nodes" then
+      cfg := { cfg with commandNodes := true, declNodesOnly := true }
     match p.flag? "report-json" with
     | some f => cfg := { cfg with reportJson? := some (f.as! String) }
     | none => pure ()
@@ -944,7 +947,7 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
     m.insert path (prev ++ nodes))
 
 @[inline] def commandNodesFromTrees (filePath : System.FilePath) (inputCtx : Parser.InputContext)
-    (lines : Array String) (trees : Array InfoTree) : Array NodeAcc :=
+    (lines : Array String) (trees : Array InfoTree) (declOnly : Bool) : Array NodeAcc :=
   Id.run do
     let mut out : Array NodeAcc := #[]
     for tree in trees do
@@ -959,8 +962,11 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
               let infoMetrics := infoTreeMetricMap (countInfoTree tree {})
               let metrics := mergeMetricMap textMetrics infoMetrics
               let (name, kind) := commandNameAndKind stx
-              let node := makeCommandNode filePath span name kind metrics
-              out := out.push node
+              if declOnly && kind != "decl" then
+                pure ()
+              else
+                let node := makeCommandNode filePath span name kind metrics
+                out := out.push node
     return out
 
 @[inline] def infoTreeSpecs : Array MetricSpec :=
@@ -1013,7 +1019,7 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
     let info := s.commandState.infoState
     let trees := substituteInfoTrees info
     if ctx.cfg.commandNodes then
-      let nodes := commandNodesFromTrees path inputCtx lines trees
+      let nodes := commandNodesFromTrees path inputCtx lines trees ctx.cfg.declNodesOnly
       addCommandNodes ctx.commandNodesRef path nodes
     let acc := countInfoTreesArray trees
     return infoTreeMetricMap acc
@@ -1266,6 +1272,7 @@ def registerCollector (c : Collector) : IO Unit :=
     infotree; "Collect InfoTree summary metrics (slow; requires lake env)"
     "infotree-jobs" : Nat; "Parallel jobs for infotree collection (default: 1)"
     "command-nodes"; "Emit command/decl nodes under each file (requires infotree)"
+    "decl-nodes"; "Emit only decl nodes under each file (implies --command-nodes)"
     "report-json" : String; "Write agent report JSON to path (optional)"
     "report-md" : String; "Write agent report Markdown to path (optional)"
     "report-top" : Nat; "Top N items per metric in report (default: 30)"

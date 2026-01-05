@@ -5,7 +5,7 @@ open LeanBench
 
 @[inline] def observeRoot : String := "benchdata"
 
-@[inline] def mkObserveCfg (infoTree : Bool) (commandNodes : Bool) : ObserveConfig := {
+@[inline] def mkObserveCfg (infoTree : Bool) (commandNodes : Bool) (declOnly : Bool) : ObserveConfig := {
   root := observeRoot
   out? := none
   schemaVersion := "0.1.0"
@@ -16,6 +16,7 @@ open LeanBench
   infoTree := infoTree
   infoTreeJobs := 1
   commandNodes := commandNodes
+  declNodesOnly := declOnly
   reportJson? := none
   reportMd? := none
   reportTop := 30
@@ -29,16 +30,21 @@ open LeanBench
 }
 
 bench "observe/textscan_small" (mkObserveBenchCfg ["textscan"] 5) do
-  let cfg := mkObserveCfg false false
+  let cfg := mkObserveCfg false false false
   let _ ← artifactJson cfg "bench"
   pure ()
 
 bench "observe/infotree_small" (mkObserveBenchCfg ["infotree"] 2) do
-  let cfg := mkObserveCfg true false
+  let cfg := mkObserveCfg true false false
   let _ ← artifactJson cfg "bench"
   pure ()
 
 bench "observe/infotree_cmdnodes_small" (mkObserveBenchCfg ["infotree", "command-nodes"] 2) do
-  let cfg := mkObserveCfg true true
+  let cfg := mkObserveCfg true true false
+  let _ ← artifactJson cfg "bench"
+  pure ()
+
+bench "observe/decl_nodes_small" (mkObserveBenchCfg ["infotree", "decl-nodes"] 2) do
+  let cfg := mkObserveCfg true true true
   let _ ← artifactJson cfg "bench"
   pure ()
