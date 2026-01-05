@@ -77,10 +77,23 @@ benchDriver = "LeanBench/leanbench"
 - `--json` alias for `--format json`
 - `--radar` alias for `--format radar`
 - `--radar-suite <name>` prefix radar names with `<name>//` (or set `LEANBENCH_RADAR_SUITE`)
-- `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL
+- `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL compatible with https://github.com/leanprover/radar
 - `--json-out <path>` write JSON to file
 - `--save <path>` write JSON to file and set format to json
 - `--compare <path>` compare against a JSON baseline
+
+## Radar integration
+
+If you use `github.com/leanprover/radar`, you can point a bench script at
+`scripts/radar/leanbench.sh`. It follows the radar bench script contract
+(`$1` repo path, `$2` JSONL output path) and forwards any extra args to
+`lake exe leanbench`.
+
+```bash
+# Example: run a suite with 5 samples and emit radar JSONL.
+LEANBENCH_ARGS="--suite core --samples 5" \
+  ./scripts/radar/leanbench.sh /path/to/LeanBench /tmp/radar.jsonl
+```
 
 ## Suites
 

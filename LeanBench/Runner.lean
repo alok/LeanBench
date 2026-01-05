@@ -411,7 +411,7 @@ structure BenchResult where
   results.map fun r =>
     let name := jsonEscape (radarName r.entry.name r.entry.config.suite radarSuite)
     "{" ++
-      "\"name\":\"" ++ name ++ "\"," ++
+      "\"metric\":\"" ++ name ++ "\"," ++
       "\"unit\":\"ns\"," ++
       "\"value\":" ++ r.stats.meanNs.toString ++
     "}"
