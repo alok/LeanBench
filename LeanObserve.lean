@@ -113,14 +113,6 @@ structure Collector where
   specs : Array MetricSpec
   collect : CollectContext → IO MetricByFile
 
-initialize collectorRegistry : IO.Ref (Array Collector) ← IO.mkRef #[]
-
-def registerCollector (c : Collector) : IO Unit :=
-  collectorRegistry.modify (·.push c)
-
-@[inline] def getCollectors : IO (Array Collector) :=
-  collectorRegistry.get
-
 @[inline] def emptyMetricMap : MetricMap := {}
 
 @[inline] def mergeMetricMap (a b : MetricMap) : MetricMap :=
@@ -800,27 +792,6 @@ partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FileP
     let children := node.children.map (fun child => attachCommandNodes child cmds)
     { node with children := children }
 
-@[inline] def collectorPriority (id : String) : Nat :=
-  if id == "text-scan" then 10
-  else if id == "infotree" then 20
-  else if id == "profiler" then 30
-  else 100
-
-@[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
-  let collectors ← getCollectors
-  let (profilers, others) :=
-    collectors.foldl
-      (fun (p, o) c =>
-        if c.id == "profiler" then (p.push c, o) else (p, o.push c))
-      (#[], #[])
-  let others := others.qsort (fun a b => collectorPriority a.id < collectorPriority b.id)
-  let collectors := others ++ profilers
-  let mut acc : MetricByFile := {}
-  for c in collectors do
-    let m ← c.collect ctx
-    acc := mergeByFile acc m
-  return acc
-
 @[inline] def dedupSpecs (specs : Array MetricSpec) : Array MetricSpec :=
   Id.run do
     let mut seen : Std.HashSet String := {}
@@ -880,7 +851,6 @@ partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FileP
     acc := acc.insert p m
   return acc
 
-initialize registerCollector { id := "text-scan", specs := textScanSpecs, collect := collectTextScan }
 
 structure InfoTreeAcc where
   nodes : Nat := 0
@@ -1082,7 +1052,6 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
     i := i + jobs
   return acc
 
-initialize registerCollector { id := "infotree", specs := infoTreeSpecs, collect := collectInfoTree }
 
 @[inline] def distributeProfilerWeightWith (ctx : CollectContext) (total : Float)
     (sumWeights : Nat) (weightFor : System.FilePath → Nat) : MetricByFile :=
@@ -1142,7 +1111,42 @@ initialize registerCollector { id := "infotree", specs := infoTreeSpecs, collect
               let totalBuild : Nat := ctx.files.foldl (fun acc p => acc + findBuildTimeMs ctx.buildTimes p) 0
               return distributeProfilerWeightWith ctx total totalBuild (fun p => findBuildTimeMs ctx.buildTimes p)
 
-initialize registerCollector { id := "profiler", specs := profileSpecs, collect := collectProfiler }
+@[inline] def defaultCollectors : Array Collector :=
+  #[
+    { id := "text-scan", specs := textScanSpecs, collect := collectTextScan },
+    { id := "infotree", specs := infoTreeSpecs, collect := collectInfoTree },
+    { id := "profiler", specs := profileSpecs, collect := collectProfiler }
+  ]
+
+initialize collectorRegistry : IO.Ref (Array Collector) ← IO.mkRef defaultCollectors
+
+def registerCollector (c : Collector) : IO Unit :=
+  collectorRegistry.modify (·.push c)
+
+@[inline] def getCollectors : IO (Array Collector) :=
+  collectorRegistry.get
+
+@[inline] def collectorPriority (id : String) : Nat :=
+  if id == "text-scan" then 10
+  else if id == "infotree" then 20
+  else if id == "profiler" then 30
+  else 100
+
+@[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
+  let collectors ← getCollectors
+  let (profilers, others) :=
+    collectors.foldl
+      (fun (p, o) c =>
+        if c.id == "profiler" then (p.push c, o) else (p, o.push c))
+      (#[], #[])
+  let others := others.qsort (fun a b => collectorPriority a.id < collectorPriority b.id)
+  let collectors := others ++ profilers
+  let mut acc : MetricByFile := {}
+  for c in collectors do
+    let m ← c.collect ctx
+    acc := mergeByFile acc m
+  return acc
+
 
 @[inline] def artifactJson (cfg : ObserveConfig) (generatedAt : String) : IO Json := do
   if cfg.sample then
@@ -1268,5 +1272,5 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     sample; "Emit sample metrics values"
 ]
 
-def main (args : List String) : IO UInt32 :=
+def runLeanObserve (args : List String) : IO UInt32 :=
   leanObserveCmd.validate args

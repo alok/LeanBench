@@ -28,4 +28,4 @@ root = "Main"
 
 [[lean_exe]]
 name = "leanobserve"
-root = "LeanObserve"
+root = "LeanObserve.Main"
