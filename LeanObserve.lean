@@ -17,6 +17,7 @@ structure ObserveConfig where
   buildLog? : Option String := none
   profileJson? : Option String := none
   infoTree : Bool := false
+  infoTreeJobs : Nat := 1
   commandNodes : Bool := false
   reportJson? : Option String := none
   reportMd? : Option String := none
@@ -47,6 +48,9 @@ structure ObserveConfig where
     | none => pure ()
     if p.hasFlag "infotree" then
       cfg := { cfg with infoTree := true }
+    match p.flag? "infotree-jobs" with
+    | some f => cfg := { cfg with infoTreeJobs := f.as! Nat }
+    | none => pure ()
     if p.hasFlag "command-nodes" then
       cfg := { cfg with commandNodes := true }
     match p.flag? "report-json" with
@@ -573,6 +577,11 @@ partial def listLeanFiles (root : System.FilePath) : IO (Array System.FilePath) 
 @[inline] def takeArray (xs : Array α) (n : Nat) : Array α :=
   (xs.toList.take n).toArray
 
+@[inline] def sliceArray (xs : Array α) (start stop : Nat) : Array α :=
+  let stop := min stop xs.size
+  let len := stop - start
+  (xs.toList.drop start |>.take len).toArray
+
 @[inline] def num (n : Nat) : Json :=
   Json.num (n : JsonNumber)
 
@@ -1020,7 +1029,7 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
 
 @[inline] def collectInfoTreeForFile (ctx : CollectContext) (path : System.FilePath) : IO MetricMap := do
   let content ← IO.FS.readFile path
-  let lines := content.splitOn "\n" |>.toArray
+  let lines := if ctx.cfg.commandNodes then content.splitOn "\n" |>.toArray else #[]
   let fileName := path.toString
   let mainModuleName ← Lean.moduleNameOfFileName path (some ctx.root)
   let opts : Options := {}
@@ -1043,15 +1052,34 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
   if !ctx.cfg.infoTree then
     return {}
   ensureSearchPath
+  let collectOne := fun (p : System.FilePath) => do
+    try
+      collectInfoTreeForFile ctx p
+    catch e =>
+      IO.eprintln s!"infotree: {p}: {e}"
+      pure emptyMetricMap
+  let jobs := if ctx.cfg.infoTreeJobs == 0 then 1 else ctx.cfg.infoTreeJobs
+  if ctx.cfg.commandNodes || jobs <= 1 || ctx.files.size <= 1 then
+    let mut acc : MetricByFile := {}
+    for p in ctx.files do
+      let m ← collectOne p
+      acc := acc.insert p m
+    return acc
   let mut acc : MetricByFile := {}
-  for p in ctx.files do
-    let m ←
-      try
-        collectInfoTreeForFile ctx p
-      catch e =>
-        IO.eprintln s!"infotree: {p}: {e}"
-        pure emptyMetricMap
-    acc := acc.insert p m
+  let mut i := 0
+  while i < ctx.files.size do
+    let chunk := sliceArray ctx.files i (i + jobs)
+    let mut tasks : Array (Task (Except IO.Error MetricMap)) := #[]
+    for p in chunk do
+      tasks := tasks.push (← IO.asTask (collectOne p))
+    for idx in [0:tasks.size] do
+      let p := chunk[idx]!
+      match (tasks[idx]!).get with
+      | .ok m => acc := acc.insert p m
+      | .error e =>
+          IO.eprintln s!"infotree: {p}: {e}"
+          acc := acc.insert p emptyMetricMap
+    i := i + jobs
   return acc
 
 initialize registerCollector { id := "infotree", specs := infoTreeSpecs, collect := collectInfoTree }
@@ -1232,6 +1260,7 @@ initialize registerCollector { id := "profiler", specs := profileSpecs, collect 
     "build-log" : String; "Path to build log with timing entries (optional)"
     "profile-json" : String; "Path to trace.profiler.output JSON (optional)"
     infotree; "Collect InfoTree summary metrics (slow; requires lake env)"
+    "infotree-jobs" : Nat; "Parallel jobs for infotree collection (default: 1)"
     "command-nodes"; "Emit command/decl nodes under each file (requires infotree)"
     "report-json" : String; "Write agent report JSON to path (optional)"
     "report-md" : String; "Write agent report Markdown to path (optional)"

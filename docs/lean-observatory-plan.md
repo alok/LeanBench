@@ -125,6 +125,7 @@ Phase 1 (InfoTree summary):
 Usage note:
 - Run `leanobserve` under `lake env` so `LEAN_PATH` is set for imports, e.g.
   `lake env ./.lake/build/bin/leanobserve --root . --out artifacts/metrics.json --infotree`
+- Use `--infotree-jobs N` to parallelize infotree collection when command nodes are not needed.
 
 Agent loop:
 - `./scripts/observe_agent_loop.sh . artifacts infotree` generates metrics + report and starts a local server.
