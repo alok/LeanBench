@@ -8,6 +8,9 @@
 /artifacts/report.json
 /artifacts/report.md
 /artifacts/treemap-*.png
+/benchdata/.lake
+/benchdata/.cache
+/benchdata/build
 /radar/config-server.yaml
 /radar/config-runner.yaml
 /radar/state/

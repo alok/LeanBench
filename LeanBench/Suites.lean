@@ -13,6 +13,11 @@ bench_suite "leanbench" ({
   tags := ["leanbench", "internal"]
 })
 
+bench_suite "observe" ({
+  description := "LeanObserve end-to-end benches"
+  tags := ["observe"]
+})
+
 bench_suite "text" ({
   description := "string + json benches"
   tags := ["string", "json"]

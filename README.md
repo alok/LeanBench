@@ -97,6 +97,16 @@ LEANBENCH_ARGS="--suite core --samples 5" \
 
 Example radar configs live in `radar/` (copy `.example.yaml` files and edit tokens/URLs).
 
+## Observe benches
+
+The `observe` suite runs small end-to-end LeanObserve passes over `benchdata/`.
+These are intended for perf regression tracking of infotree and command-node
+collection.
+
+```bash
+lake exe leanbench --suite observe
+```
+
 ## Suites
 
 Attach a suite directly in `BenchConfig`, or define a suite driver that

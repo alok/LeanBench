@@ -19,6 +19,9 @@ rev = "main"
 [[lean_lib]]
 name = "LeanBench"
 
+[[lean_lib]]
+name = "LeanObserve"
+
 [[lean_exe]]
 name = "leanbench"
 root = "Main"
