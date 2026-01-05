@@ -95,6 +95,8 @@ LEANBENCH_ARGS="--suite core --samples 5" \
   ./scripts/radar/leanbench.sh /path/to/LeanBench /tmp/radar.jsonl
 ```
 
+Example radar configs live in `radar/` (copy `.example.yaml` files and edit tokens/URLs).
+
 ## Suites
 
 Attach a suite directly in `BenchConfig`, or define a suite driver that

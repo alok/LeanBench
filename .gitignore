@@ -8,3 +8,7 @@
 /artifacts/report.json
 /artifacts/report.md
 /artifacts/treemap-*.png
+/radar/config-server.yaml
+/radar/config-runner.yaml
+/radar/state/
+/radar/cache/
