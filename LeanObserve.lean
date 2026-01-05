@@ -331,6 +331,217 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
                       | none => 0.0
                       | some weights => sumJsonNumbers weights
 
+@[inline] def jsonGetStr? (j : Json) : Option String :=
+  match j with
+  | .str s => some s
+  | _ => none
+
+@[inline] def jsonGetNat? (j : Json) : Option Nat :=
+  match jsonGetNum? j with
+  | none => none
+  | some n =>
+      if n < 0.0 then
+        none
+      else
+        some (Float.toUInt64 n).toNat
+
+@[inline] def jsonGetNumArray? (j : Json) : Option (Array Float) :=
+  match jsonGetArr? j with
+  | none => none
+  | some arr =>
+      Id.run do
+        let mut out : Array Float := Array.mkEmpty arr.size
+        for x in arr do
+          match jsonGetNum? x with
+          | some v => out := out.push v
+          | none => return none
+        return some out
+
+@[inline] def jsonGetNatArray? (j : Json) : Option (Array Nat) :=
+  match jsonGetArr? j with
+  | none => none
+  | some arr =>
+      Id.run do
+        let mut out : Array Nat := Array.mkEmpty arr.size
+        for x in arr do
+          match jsonGetNat? x with
+          | some v => out := out.push v
+          | none => return none
+        return some out
+
+@[inline] def jsonGetStringArray? (j : Json) : Option (Array String) :=
+  match jsonGetArr? j with
+  | none => none
+  | some arr =>
+      Id.run do
+        let mut out : Array String := Array.mkEmpty arr.size
+        for x in arr do
+          match jsonGetStr? x with
+          | some v => out := out.push v
+          | none => return none
+        return some out
+
+@[inline] def dropLeadingPathSeparators (s : String) : String :=
+  let rec go (cs : List Char) : List Char :=
+    match cs with
+    | '/' :: rest => go rest
+    | '\\' :: rest => go rest
+    | _ => cs
+  String.ofList (go s.toList)
+
+@[inline] def dropSuffixString (s : String) (suffix : String) : String :=
+  if s.endsWith suffix then
+    (s.toSubstring.dropRight suffix.length).toString
+  else
+    s
+
+@[inline] def pathToModuleName (root path : System.FilePath) : String :=
+  let rootStr := root.toString
+  let pathStr := path.toString
+  let rel :=
+    if pathStr.startsWith rootStr then
+      (pathStr.drop rootStr.length).toString
+    else
+      pathStr
+  let rel := dropLeadingPathSeparators rel
+  let rel := dropSuffixString rel ".lean"
+  let chars := rel.toList.map (fun c => if c == '/' || c == '\\' then '.' else c)
+  String.ofList chars
+
+@[inline] def moduleMapFromFiles (root : System.FilePath) (files : Array System.FilePath) :
+    Std.HashMap String System.FilePath :=
+  Id.run do
+    let mut out : Std.HashMap String System.FilePath := {}
+    for p in files do
+      let modName := pathToModuleName root p
+      if modName.isEmpty then
+        pure ()
+      else
+        out := out.insert modName p
+    return out
+
+@[inline] def declMapFromNodes (cmds : Std.HashMap System.FilePath (Array NodeAcc)) :
+    Std.HashMap String System.FilePath :=
+  Id.run do
+    let mut out : Std.HashMap String System.FilePath := {}
+    for (path, nodes) in cmds.toList do
+      for n in nodes do
+        if n.name.isEmpty then
+          pure ()
+        else if out.contains n.name then
+          pure ()
+        else
+          out := out.insert n.name path
+    return out
+
+@[inline] def lastSegment (xs : List String) : String :=
+  match xs.reverse with
+  | [] => ""
+  | x :: _ => x
+
+@[inline] def dropLastSegment (xs : List String) : List String :=
+  match xs with
+  | [] => []
+  | _ :: [] => []
+  | x :: rest => x :: dropLastSegment rest
+
+@[inline] def moduleFromFuncName (name : String) : Option String :=
+  let candidate := (lastSegment (name.splitOn ":")).trimAscii.toString
+  if !candidate.contains '.' then
+    none
+  else
+    let parts := candidate.splitOn "."
+    let modParts := dropLastSegment parts
+    let modName := String.intercalate "." modParts
+    if modName.isEmpty then none else some modName
+
+@[inline] def declFromFuncName (name : String) : Option String :=
+  let candidate := (lastSegment (name.splitOn ":")).trimAscii.toString
+  if candidate.isEmpty then
+    none
+  else if candidate.contains '.' then
+    let parts := candidate.splitOn "."
+    let decl := lastSegment parts
+    if decl.isEmpty then none else some decl
+  else
+    some candidate
+
+@[inline] def addWeight (m : Std.HashMap System.FilePath Float) (path : System.FilePath)
+    (w : Float) : Std.HashMap System.FilePath Float :=
+  let prev := m.getD path 0.0
+  m.insert path (prev + w)
+
+@[inline] def weightsFromProfiler (j : Json) (moduleMap : Std.HashMap String System.FilePath)
+    (declMap : Std.HashMap String System.FilePath) : Std.HashMap System.FilePath Float :=
+  match jsonGetObj? j with
+  | none => {}
+  | some obj =>
+      match jsonGetField? obj "threads" >>= jsonGetArr? with
+      | none => {}
+      | some threads =>
+          Id.run do
+            let mut out : Std.HashMap System.FilePath Float := {}
+            for thread in threads do
+              match jsonGetObj? thread with
+              | none => pure ()
+              | some threadObj =>
+                  let some samplesObj := jsonGetField? threadObj "samples" >>= jsonGetObj?
+                    | pure ()
+                  let some stacks := jsonGetField? samplesObj "stack" >>= jsonGetNatArray?
+                    | pure ()
+                  let some weights := jsonGetField? samplesObj "weight" >>= jsonGetNumArray?
+                    | pure ()
+                  let some stackTableObj := jsonGetField? threadObj "stackTable" >>= jsonGetObj?
+                    | pure ()
+                  let some stackFrames := jsonGetField? stackTableObj "frame" >>= jsonGetNatArray?
+                    | pure ()
+                  let some frameTableObj := jsonGetField? threadObj "frameTable" >>= jsonGetObj?
+                    | pure ()
+                  let some frameFuncs := jsonGetField? frameTableObj "func" >>= jsonGetNatArray?
+                    | pure ()
+                  let some funcTableObj := jsonGetField? threadObj "funcTable" >>= jsonGetObj?
+                    | pure ()
+                  let some funcNames := jsonGetField? funcTableObj "name" >>= jsonGetNatArray?
+                    | pure ()
+                  let some strings := jsonGetField? threadObj "stringArray" >>= jsonGetStringArray?
+                    | pure ()
+                  let n := weights.size
+                  for i in [0:n] do
+                    match arrayGet? stacks i, arrayGet? weights i with
+                    | some stackIdx, some weight =>
+                        match arrayGet? stackFrames stackIdx with
+                        | none => pure ()
+                        | some frameIdx =>
+                            match arrayGet? frameFuncs frameIdx with
+                            | none => pure ()
+                            | some funcIdx =>
+                                match arrayGet? funcNames funcIdx with
+                                | none => pure ()
+                                | some nameIdx =>
+                                    match arrayGet? strings nameIdx with
+                                    | none => pure ()
+                                    | some funcName =>
+                                        match moduleFromFuncName funcName with
+                                        | some modName =>
+                                            match moduleMap.get? modName with
+                                            | some path => out := addWeight out path weight
+                                            | none =>
+                                                match declFromFuncName funcName with
+                                                | some decl =>
+                                                    match declMap.get? decl with
+                                                    | some path => out := addWeight out path weight
+                                                    | none => pure ()
+                                                | none => pure ()
+                                        | none =>
+                                            match declFromFuncName funcName with
+                                            | some decl =>
+                                                match declMap.get? decl with
+                                                | some path => out := addWeight out path weight
+                                                | none => pure ()
+                                            | none => pure ()
+                    | _, _ => pure ()
+            return out
+
 @[inline] def floatToNat (f : Float) : Nat :=
   if f <= 0.0 then 0 else (Float.toUInt64 f).toNat
 
@@ -580,8 +791,21 @@ partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FileP
     let children := node.children.map (fun child => attachCommandNodes child cmds)
     { node with children := children }
 
+@[inline] def collectorPriority (id : String) : Nat :=
+  if id == "text-scan" then 10
+  else if id == "infotree" then 20
+  else if id == "profiler" then 30
+  else 100
+
 @[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
   let collectors ← getCollectors
+  let (profilers, others) :=
+    collectors.foldl
+      (fun (p, o) c =>
+        if c.id == "profiler" then (p.push c, o) else (p, o.push c))
+      (#[], #[])
+  let others := others.qsort (fun a b => collectorPriority a.id < collectorPriority b.id)
+  let collectors := others ++ profilers
   let mut acc : MetricByFile := {}
   for c in collectors do
     let m ← c.collect ctx
@@ -829,22 +1053,20 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
 
 initialize registerCollector { id := "infotree", specs := infoTreeSpecs, collect := collectInfoTree }
 
-@[inline] def distributeProfilerWeight (ctx : CollectContext) (total : Float) : MetricByFile :=
+@[inline] def distributeProfilerWeightWith (ctx : CollectContext) (total : Float)
+    (sumWeights : Nat) (weightFor : System.FilePath → Nat) : MetricByFile :=
   Id.run do
     let files := ctx.files
     if files.isEmpty then
       return {}
-    let totalBuild : Nat := files.foldl (fun acc p => acc + findBuildTimeMs ctx.buildTimes p) 0
-    let totalBuildF := Float.ofNat totalBuild
     let nF := Float.ofNat files.size
     let mut out : MetricByFile := {}
     for p in files do
-      let build := findBuildTimeMs ctx.buildTimes p
       let weight :=
-        if totalBuild == 0 then
+        if sumWeights == 0 then
           total / nF
         else
-          total * (Float.ofNat build) / totalBuildF
+          total * (Float.ofNat (weightFor p)) / (Float.ofNat sumWeights)
       let mut m : MetricMap := {}
       m := m.insert "profile_weight" (floatToNat weight)
       out := out.insert p m
@@ -859,7 +1081,35 @@ initialize registerCollector { id := "infotree", specs := infoTreeSpecs, collect
       | .error _ => pure {}
       | .ok j =>
           let total := extractProfilerWeight j
-          return distributeProfilerWeight ctx total
+          let cmdMap ← ctx.commandNodesRef.get
+          let moduleMap := moduleMapFromFiles ctx.root ctx.files
+          let declMap := declMapFromNodes cmdMap
+          let weights := weightsFromProfiler j moduleMap declMap
+          if !weights.isEmpty then
+            let mut out : MetricByFile := {}
+            for p in ctx.files do
+              let w := weights.getD p 0.0
+              let mut m : MetricMap := {}
+              m := m.insert "profile_weight" (floatToNat w)
+              out := out.insert p m
+            return out
+          else
+            let infoWeights : Std.HashMap System.FilePath Nat :=
+              Id.run do
+                let mut acc : Std.HashMap System.FilePath Nat := {}
+                for (path, nodes) in cmdMap.toList do
+                  let mut totalNodes := 0
+                  for n in nodes do
+                    totalNodes := totalNodes + (n.metrics.getD "infotree_nodes" 0)
+                  if totalNodes > 0 then
+                    acc := acc.insert path totalNodes
+                return acc
+            if !infoWeights.isEmpty then
+              let sum := infoWeights.fold (fun acc _ v => acc + v) 0
+              return distributeProfilerWeightWith ctx total sum (fun p => infoWeights.getD p 0)
+            else
+              let totalBuild : Nat := ctx.files.foldl (fun acc p => acc + findBuildTimeMs ctx.buildTimes p) 0
+              return distributeProfilerWeightWith ctx total totalBuild (fun p => findBuildTimeMs ctx.buildTimes p)
 
 initialize registerCollector { id := "profiler", specs := profileSpecs, collect := collectProfiler }
 

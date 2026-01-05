@@ -25,8 +25,11 @@ EOF2
 
 lake --file "$tmp_lakefile" build --rehash --no-cache -v 2>&1 | tee "$build_log"
 
+lake build leanobserve
+
 ./.lake/build/bin/leanobserve \
   --root "$root" \
+  --infotree \
   --build-log "$build_log" \
   --profile-json "$profile_json" \
   --out "$metrics_json" \
