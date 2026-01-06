@@ -88,6 +88,21 @@ structure NodeAcc where
   metrics : MetricMap := {}
   children : List NodeAcc := []
 
+def defaultNodeAcc : NodeAcc :=
+  { id := ""
+    name := ""
+    path := System.FilePath.mk ""
+    kind := "module"
+    span := { file := "", line := 0, col := 0, endLine := 0, endCol := 0 }
+    isFile := false
+    metrics := {}
+    children := []
+  }
+
+instance : Inhabited NodeAcc := ⟨defaultNodeAcc⟩
+
+instance : Inhabited (NodeAcc × Nat) := ⟨(defaultNodeAcc, 0)⟩
+
 structure MetricSpec where
   key : String
   label : String
@@ -423,20 +438,6 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
         out := out.insert modName p
     return out
 
-@[inline] def declMapFromNodes (cmds : Std.HashMap System.FilePath (Array NodeAcc)) :
-    Std.HashMap String System.FilePath :=
-  Id.run do
-    let mut out : Std.HashMap String System.FilePath := {}
-    for (path, nodes) in cmds.toList do
-      for n in nodes do
-        if n.name.isEmpty then
-          pure ()
-        else if out.contains n.name then
-          pure ()
-        else
-          out := out.insert n.name path
-    return out
-
 @[inline] def lastSegment (xs : List String) : String :=
   match xs.reverse with
   | [] => ""
@@ -447,6 +448,30 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
   | [] => []
   | _ :: [] => []
   | x :: rest => x :: dropLastSegment rest
+
+@[inline] def declMapFromNodes (cmds : Std.HashMap System.FilePath (Array NodeAcc)) :
+    Std.HashMap String System.FilePath :=
+  Id.run do
+    let mut counts : Std.HashMap String Nat := {}
+    for (_, nodes) in cmds.toList do
+      for n in nodes do
+        if n.kind != "decl" || n.name.isEmpty then
+          pure ()
+        else
+          let short := lastSegment (n.name.splitOn ".")
+          let prev := counts.getD short 0
+          counts := counts.insert short (prev + 1)
+    let mut out : Std.HashMap String System.FilePath := {}
+    for (path, nodes) in cmds.toList do
+      for n in nodes do
+        if n.kind != "decl" || n.name.isEmpty then
+          pure ()
+        else if !out.contains n.name then
+          out := out.insert n.name path
+        let short := lastSegment (n.name.splitOn ".")
+        if counts.getD short 0 == 1 && !out.contains short then
+          out := out.insert short path
+    return out
 
 @[inline] def funcNameCandidate (name : String) : String :=
   (lastSegment (name.splitOn ":")).trimAscii.toString
@@ -485,6 +510,34 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
     (w : Float) : Std.HashMap String Float :=
   let prev := m.getD name 0.0
   m.insert name (prev + w)
+
+@[inline] def lookupDeclPath? (declMap : Std.HashMap String System.FilePath) (name : String) :
+    Option System.FilePath :=
+  match declMap.get? name with
+  | some path => some path
+  | none =>
+      let parts := name.splitOn "."
+      match parts.reverse with
+      | [] => none
+      | _ :: rest =>
+          let parent := String.intercalate "." rest.reverse
+          if parent.isEmpty then none else declMap.get? parent
+
+@[inline] def lookupDeclKey? (declMap : Std.HashMap String System.FilePath) (name : String) :
+    Option String :=
+  if declMap.contains name then
+    some name
+  else
+    let parts := name.splitOn "."
+    match parts.reverse with
+    | [] => none
+    | _ :: rest =>
+        let parent := String.intercalate "." rest.reverse
+        if !parent.isEmpty && declMap.contains parent then
+          some parent
+        else
+          let short := lastSegment parts
+          if declMap.contains short then some short else none
 
 structure ProfilerWeights where
   fileWeights : Std.HashMap System.FilePath Float := {}
@@ -548,23 +601,22 @@ structure ProfilerWeights where
                                             | none =>
                                                 match declFullFromFuncName funcName with
                                                 | some decl =>
-                                                    match declMap.get? decl with
+                                                    match lookupDeclPath? declMap decl with
                                                     | some path => outFiles := addWeight outFiles path weight
                                                     | none => pure ()
                                                 | none => pure ()
                                         | none =>
                                             match declFullFromFuncName funcName with
                                             | some decl =>
-                                                match declMap.get? decl with
+                                                match lookupDeclPath? declMap decl with
                                                 | some path => outFiles := addWeight outFiles path weight
                                                 | none => pure ()
                                             | none => pure ()
                                         match declFullFromFuncName funcName with
                                         | some decl =>
-                                            if declMap.contains decl then
-                                              outDecls := addDeclWeight outDecls decl weight
-                                            else
-                                              pure ()
+                                            match lookupDeclKey? declMap decl with
+                                            | some key => outDecls := addDeclWeight outDecls key weight
+                                            | none => pure ()
                                         | none => pure ()
                     | _, _ => pure ()
             return { fileWeights := outFiles, declWeights := outDecls }
@@ -813,6 +865,31 @@ where
   | some path =>
       IO.FS.writeFile (System.FilePath.mk path) (reportToMarkdown report)
   | none => pure ()
+
+@[inline] def topProfileDecls (cmds : Std.HashMap System.FilePath (Array NodeAcc)) (topN : Nat) :
+    Array (NodeAcc × Nat) :=
+  Id.run do
+    let mut acc : Array (NodeAcc × Nat) := #[]
+    for (_, nodes) in cmds.toList do
+      for n in nodes do
+        if n.kind == "decl" then
+          let w := n.metrics.getD "profile_weight" 0
+          if w > 0 then
+            acc := acc.push (n, w)
+    takeArray (acc.qsort (fun a b => a.snd > b.snd)) topN
+
+@[inline] def printProfileTop (cfg : ObserveConfig) (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : IO Unit := do
+  if cfg.profileJson?.isNone || !cfg.commandNodes then
+    return ()
+  let topN := if cfg.reportTop == 0 then 20 else cfg.reportTop
+  let tops := topProfileDecls cmds topN
+  if tops.isEmpty then
+    return ()
+  IO.println "profile_weight top decls:"
+  for i in [0:tops.size] do
+    let (n, w) := tops[i]!
+    let span := n.span
+    IO.println s!"  #{i + 1} {w} {n.name} ({n.path}:{span.line}:{span.col})"
 
 @[inline] def rootLabel (root : System.FilePath) : String :=
   match root.components.reverse with
@@ -1269,6 +1346,7 @@ def registerCollector (c : Collector) : IO Unit :=
     let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs)
     writeReport cfg rootAcc specs generatedAt
     writeEntries cfg rootPath rootAcc
+    printProfileTop cfg {}
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -1303,6 +1381,7 @@ def registerCollector (c : Collector) : IO Unit :=
   rootAcc := attachCommandNodes rootAcc cmdMap
   writeReport cfg rootAcc specs generatedAt
   writeEntries cfg root rootAcc
+  printProfileTop cfg cmdMap
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
     , ("generated_at", Json.str generatedAt)
