@@ -794,6 +794,7 @@ structure Report where
   generatedAt : String
   root : String
   metrics : List MetricReport
+  profileTopDecls : List ReportItem := []
 
 partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
   let rec go (node : NodeAcc) (acc : List NodeAcc) : List NodeAcc :=
@@ -820,6 +821,19 @@ partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
   let top := items.take topN
   { key := spec.key, label := spec.label, top := top }
 
+@[inline] def topProfileDeclItems (rootAcc : NodeAcc) (topN : Nat) : List ReportItem :=
+  let leaves := collectLeaves rootAcc
+  let items := leaves.filter (fun leaf => leaf.kind == "decl")
+    |>.map (fun leaf =>
+      { name := leaf.name
+        path := leaf.path.toString
+        line := leaf.span.line
+        col := leaf.span.col
+        value := reportMetricValue leaf.metrics "profile_weight" })
+    |>.filter (fun item => item.value > 0)
+  let items := (items.toArray.qsort (fun a b => a.value > b.value)).toList
+  items.take topN
+
 @[inline] def reportToJson (r : Report) : Json :=
   let metricsJson := r.metrics.map (fun m =>
     Json.mkObj
@@ -834,14 +848,33 @@ partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
             , ("value", num item.value)
             ])).toArray)
       ])
+  let profileJson :=
+    Json.arr <| (r.profileTopDecls.map (fun item =>
+      Json.mkObj
+        [ ("name", Json.str item.name)
+        , ("path", Json.str item.path)
+        , ("line", Json.num item.line)
+        , ("col", Json.num item.col)
+        , ("value", num item.value)
+        ])).toArray
   Json.mkObj
     [ ("generated_at", Json.str r.generatedAt)
     , ("root", Json.str r.root)
     , ("metrics", Json.arr metricsJson.toArray)
+    , ("profile_top_decls", profileJson)
     ]
 
 @[inline] def reportToMarkdown (r : Report) : String :=
   let header := s!"# Lean Observatory Report\n\nGenerated: {r.generatedAt}\nRoot: {r.root}\n"
+  let profileSection :=
+    if r.profileTopDecls.isEmpty then
+      ""
+    else
+      let items :=
+        (enumerate 0 r.profileTopDecls).map (fun (idx, item) =>
+          s!"{idx + 1}. {item.value} — {item.name} ({item.path}:{item.line})"
+        ) |> String.intercalate "\n"
+      s!"\n## Profile weight top decls (`profile_weight`)\n\n{items}\n"
   let sections :=
     r.metrics.map (fun m =>
       let items :=
@@ -850,7 +883,7 @@ partial def collectLeaves (node : NodeAcc) : List NodeAcc :=
         ) |> String.intercalate "\n"
       s!"\n## {m.label} (`{m.key}`)\n\n{items}\n"
     ) |> String.intercalate "\n"
-  header ++ sections
+  header ++ profileSection ++ sections
 
 where
   enumerate (n : Nat) (xs : List ReportItem) : List (Nat × ReportItem) :=
@@ -863,7 +896,9 @@ where
     return ()
   let leaves := collectLeaves rootAcc
   let metrics := specs.toList.map (fun spec => buildMetricReport spec leaves cfg.reportTop)
-  let report : Report := { generatedAt := generatedAt, root := cfg.root, metrics := metrics }
+  let profileTopDecls := topProfileDeclItems rootAcc cfg.reportTop
+  let report : Report :=
+    { generatedAt := generatedAt, root := cfg.root, metrics := metrics, profileTopDecls := profileTopDecls }
   match cfg.reportJson? with
   | some path =>
       IO.FS.writeFile (System.FilePath.mk path) (toString <| reportToJson report)
