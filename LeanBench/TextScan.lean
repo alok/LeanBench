@@ -1,4 +1,5 @@
 import Std
+import Std.Internal.Parsec
 import Lean
 
 
@@ -58,6 +59,32 @@ partial def tokenizeLine (chars : List Char) : List String :=
           | '-', '>' :: rest => go rest [] ("->" :: acc)
           | _, _ => go cs [] (String.singleton c :: acc)
   go chars [] []
+
+open Std.Internal.Parsec
+open Std.Internal.Parsec.String
+
+@[inline] def wordChar (c : Char) : Bool :=
+  isWordChar c
+
+@[inline] def wordToken : Parser String :=
+  many1Chars (satisfy wordChar)
+
+@[inline] def punctToken : Parser String :=
+  attempt (pstring ":=")
+    <|> attempt (pstring "<-")
+    <|> attempt (pstring "->")
+    <|> (String.singleton <$> any)
+
+@[inline] def token : Parser String :=
+  wordToken <|> punctToken
+
+@[inline] def tokens : Parser (Array String) :=
+  ws *> many (token <* ws)
+
+@[inline] def tokenizeLineParsec (line : String) : List String :=
+  match Parser.run tokens line with
+  | .ok ts => ts.toList
+  | .error _ => tokenizeLine line.toList
 
 @[inline] def countIndent (chars : List Char) : Nat :=
   match chars with
@@ -169,9 +196,6 @@ def blockEndNeedle : List Char := "-/".toList
 def simpleName (s : String) : Lean.Name :=
   Lean.Name.str Lean.Name.anonymous s
 
-def suffixesFromNames (names : List Lean.Name) : List String :=
-  names.map (fun name => s!".{name.toString}")
-
 def readSuffixNames : List Lean.Name :=
   [simpleName "get", simpleName "get!", simpleName "getD",
    simpleName "get?", simpleName "read", simpleName "read?"]
@@ -186,10 +210,23 @@ def freeSuffixNames : List Lean.Name :=
    simpleName "pop", simpleName "pop?", simpleName "reset",
    simpleName "shrink", simpleName "release", simpleName "dispose"]
 
-def readSuffixes : List String := suffixesFromNames readSuffixNames
-def writeSuffixes : List String := suffixesFromNames writeSuffixNames
-def allocSuffixes : List String := suffixesFromNames allocSuffixNames
-def freeSuffixes : List String := suffixesFromNames freeSuffixNames
+@[inline] def nameFromToken? (tok : String) : Option Lean.Name :=
+  if !isWordToken tok then
+    none
+  else
+    let parts := tok.splitOn "."
+    if parts.isEmpty then
+      none
+    else
+      let name := parts.foldl (fun acc part =>
+        if part.isEmpty then acc else Lean.Name.str acc part) Lean.Name.anonymous
+      if name == Lean.Name.anonymous then none else some name
+
+@[inline] def countSuffixNameMatches (tokens : List String) (suffixes : List Lean.Name) : Nat :=
+  tokens.foldl (fun acc t =>
+    match nameFromToken? t with
+    | none => acc
+    | some n => if suffixes.any (·.isSuffixOf n) then acc + 1 else acc) 0
 
 @[inline] def isDefLine (trimmed : String) : Bool :=
   defLinePrefixes.any (fun k => trimmed.startsWith s!"{k} ")
@@ -266,10 +303,10 @@ def freeSuffixes : List String := suffixesFromNames freeSuffixNames
     let acc := pushLoopTimes acc indent loopCount
     let assignmentCount := tokens.foldl (fun n t => if t == ":=" || t == "<-" then n + 1 else n) 0
     let acc := { acc with assignments := acc.assignments + assignmentCount }
-    let acc := { acc with globalReads := acc.globalReads + countSuffixMatches wordTokens readSuffixes }
-    let acc := { acc with globalWrites := acc.globalWrites + countSuffixMatches wordTokens writeSuffixes }
-    let acc := { acc with heapAllocs := acc.heapAllocs + countSuffixMatches wordTokens allocSuffixes }
-    let acc := { acc with heapFrees := acc.heapFrees + countSuffixMatches wordTokens freeSuffixes }
+    let acc := { acc with globalReads := acc.globalReads + countSuffixNameMatches wordTokens readSuffixNames }
+    let acc := { acc with globalWrites := acc.globalWrites + countSuffixNameMatches wordTokens writeSuffixNames }
+    let acc := { acc with heapAllocs := acc.heapAllocs + countSuffixNameMatches wordTokens allocSuffixNames }
+    let acc := { acc with heapFrees := acc.heapFrees + countSuffixNameMatches wordTokens freeSuffixNames }
     let acc :=
       if isDefLine trimmed then
         acc
@@ -282,7 +319,7 @@ def freeSuffixes : List String := suffixesFromNames freeSuffixNames
     (acc, inBlock)
 
 @[inline] def lineMetrics (line : String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc × Bool :=
-  lineMetricsWithTokens line (tokenizeLine line.toList) inBlock acc
+  lineMetricsWithTokens line (tokenizeLineParsec line) inBlock acc
 
 @[inline] def scanLines (lines : List String) : ScanAcc :=
   let rec go (lines : List String) (inBlock : Bool) (acc : ScanAcc) : ScanAcc :=
@@ -292,6 +329,9 @@ def freeSuffixes : List String := suffixesFromNames freeSuffixNames
         let (acc, inBlock) := lineMetrics line inBlock acc
         go rest inBlock acc
   go lines false {}
+
+@[inline] def scanLinesParsec (lines : List String) : ScanAcc :=
+  scanLines lines
 
 @[inline] def metricMapFromScan (acc : ScanAcc) (buildTimeMs : Nat) : MetricMap :=
   Id.run do
