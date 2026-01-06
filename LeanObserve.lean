@@ -110,6 +110,9 @@ structure DeclShare where
 
 instance : Inhabited DeclShare := ⟨{ node := defaultNodeAcc, base := 0, rem := 0.0 }⟩
 
+@[inline] def profileWeightSourceDirect : Nat := 1
+@[inline] def profileWeightSourceDistributed : Nat := 2
+
 structure MetricSpec where
   key : String
   label : String
@@ -748,14 +751,20 @@ partial def insertNode (node : NodeAcc) (basePath : System.FilePath) (components
       { node with children := children }
 
 @[inline] def tagsJson (node : NodeAcc) : Json :=
-  if node.kind == "command" then
-    Json.arr #[Json.str "command"]
-  else if node.kind == "decl" then
-    Json.arr #[Json.str "decl"]
-  else if node.isFile then
-    Json.arr #[Json.str "file"]
-  else
-    Json.arr #[Json.str "dir"]
+  let base :=
+    if node.kind == "command" then #["command"]
+    else if node.kind == "decl" then #["decl"]
+    else if node.isFile then #["file"]
+    else #["dir"]
+  let source := node.metrics.getD "profile_weight_source" 0
+  let tags :=
+    if source == profileWeightSourceDirect then
+      base.push "profile_weight_direct"
+    else if source == profileWeightSourceDistributed then
+      base.push "profile_weight_distributed"
+    else
+      base
+  Json.arr (tags.map Json.str)
 
 partial def nodeAccToJson (node : NodeAcc) : Json :=
   let childrenJson := (node.children.map nodeAccToJson).toArray
@@ -920,6 +929,18 @@ where
             acc := acc.push (n, w)
     takeArray (acc.qsort (fun a b => a.snd > b.snd)) topN
 
+@[inline] def profileWeightScore (m : MetricMap) : Nat :=
+  let info := metricGetD m "infotree_nodes"
+  let size := metricGetD m "size"
+  let base := Nat.max info size
+  let base := if base == 0 then 1 else base
+  let calls := metricGetD m "call_sites"
+  let loops := metricGetD m "loop_depth_max"
+  let ifDensity := metricGetD m "if_density_bp"
+  let base := base + calls + (loops * 10)
+  let weighted := (base * (10000 + ifDensity)) / 10000
+  if weighted == 0 then 1 else weighted
+
 @[inline] def distributeFileWeightsToDecls (cmds : Std.HashMap System.FilePath (Array NodeAcc))
     (fileWeights : Std.HashMap System.FilePath Float) : Std.HashMap System.FilePath (Array NodeAcc) :=
   Id.run do
@@ -933,9 +954,7 @@ where
         let mut decls : Array DeclShare := #[]
         for n in nodes do
           if n.kind == "decl" then
-            let c := n.metrics.getD "infotree_nodes" 0
-            let c := if c == 0 then n.metrics.getD "size" 0 else c
-            let c := if c == 0 then 1 else c
+            let c := profileWeightScore n.metrics
             total := total + c
             decls := decls.push { node := n, base := 0, rem := 0.0 }
         let denom := if total == 0 then decls.size else total
@@ -943,9 +962,7 @@ where
         let mut withShares : Array DeclShare := #[]
         for i in [0:decls.size] do
           let d := decls[i]!
-          let c := d.node.metrics.getD "infotree_nodes" 0
-          let c := if c == 0 then d.node.metrics.getD "size" 0 else c
-          let c := if c == 0 then 1 else c
+          let c := profileWeightScore d.node.metrics
           let share := if denom == 0 then 0.0 else (Float.ofNat totalNat) * (Float.ofNat c) / (Float.ofNat denom)
           let base := (Float.toUInt64 share).toNat
           let rem := share - (Float.ofNat base)
@@ -971,7 +988,9 @@ where
               n
             else
               let share := weightMap.getD n.id 0
-              if share == 0 then n else { n with metrics := n.metrics.insert "profile_weight" share })
+              if share == 0 then n else
+                { n with metrics :=
+                    (n.metrics.insert "profile_weight" share).insert "profile_weight_source" profileWeightSourceDistributed })
         updated := updated.insert path nodes
     return updated
 
@@ -1076,6 +1095,7 @@ partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FileP
   #[
     { key := "profile_weight", label := "Profile weight", kind := "weight", unit := "ticks", group := "profile",
       defaultBlendWeight := 20 }
+  , { key := "profile_weight_source", label := "Profile weight source", kind := "enum", unit := "", group := "profile" }
   ]
 
 @[inline] def collectTextScan (ctx : CollectContext) : IO MetricByFile := do
@@ -1308,20 +1328,27 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
       out := out.insert p weight
     return out
 
-@[inline] def metricByFileFromWeights (ctx : CollectContext)
-    (weights : Std.HashMap System.FilePath Float) : MetricByFile :=
+@[inline] def metricByFileFromWeightsWithSource (ctx : CollectContext)
+    (weights : Std.HashMap System.FilePath Float) (source : Nat) : MetricByFile :=
   Id.run do
     let mut out : MetricByFile := {}
     for p in ctx.files do
       let w := weights.getD p 0.0
       let mut m : MetricMap := {}
       m := m.insert "profile_weight" (floatToNat w)
+      if source != 0 then
+        m := m.insert "profile_weight_source" source
       out := out.insert p m
     return out
 
+@[inline] def metricByFileFromWeights (ctx : CollectContext)
+    (weights : Std.HashMap System.FilePath Float) : MetricByFile :=
+  metricByFileFromWeightsWithSource ctx weights 0
+
 @[inline] def distributeProfilerWeightWith (ctx : CollectContext) (total : Float)
     (sumWeights : Nat) (weightFor : System.FilePath → Nat) : MetricByFile :=
-  metricByFileFromWeights ctx (distributeProfilerWeightFloatWith ctx total sumWeights weightFor)
+  metricByFileFromWeightsWithSource ctx (distributeProfilerWeightFloatWith ctx total sumWeights weightFor)
+    profileWeightSourceDistributed
 
 @[inline] def collectProfiler (ctx : CollectContext) : IO MetricByFile := do
   match ctx.cfg.profileJson? with
@@ -1337,8 +1364,10 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
           let declMap := declMapFromNodes cmdMap
           let weights := weightsFromProfiler j moduleMap declMap
           let mut fileWeights : Std.HashMap System.FilePath Float := {}
+          let mut fileWeightSource := 0
           if !weights.fileWeights.isEmpty then
             fileWeights := weights.fileWeights
+            fileWeightSource := profileWeightSourceDirect
           let mut appliedDeclWeights := false
           if !weights.declWeights.isEmpty && !cmdMap.isEmpty then
             let mut updated : Std.HashMap System.FilePath (Array NodeAcc) := {}
@@ -1351,7 +1380,9 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
                     newNodes := newNodes.push n
                   else
                     appliedDeclWeights := true
-                    newNodes := newNodes.push { n with metrics := n.metrics.insert "profile_weight" (floatToNat w) }
+                    let m := (n.metrics.insert "profile_weight" (floatToNat w)).insert
+                      "profile_weight_source" profileWeightSourceDirect
+                    newNodes := newNodes.push { n with metrics := m }
                 else
                   newNodes := newNodes.push n
               updated := updated.insert path newNodes
@@ -1371,14 +1402,16 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
             if !infoWeights.isEmpty then
               let sum := infoWeights.fold (fun acc _ v => acc + v) 0
               fileWeights := distributeProfilerWeightFloatWith ctx total sum (fun p => infoWeights.getD p 0)
+              fileWeightSource := profileWeightSourceDistributed
             else
               let totalBuild : Nat := ctx.files.foldl (fun acc p => acc + findBuildTimeMs ctx.buildTimes p) 0
               fileWeights := distributeProfilerWeightFloatWith ctx total totalBuild (fun p => findBuildTimeMs ctx.buildTimes p)
+              fileWeightSource := profileWeightSourceDistributed
           if !appliedDeclWeights && !fileWeights.isEmpty && !cmdMap.isEmpty then
             let updated := distributeFileWeightsToDecls cmdMap fileWeights
             ctx.commandNodesRef.set updated
           if !fileWeights.isEmpty then
-            return metricByFileFromWeights ctx fileWeights
+            return metricByFileFromWeightsWithSource ctx fileWeights fileWeightSource
           else
             return {}
 
@@ -1460,6 +1493,7 @@ def registerCollector (c : Collector) : IO Unit :=
     sampleMetrics := sampleMetrics.insert "infotree_doc_info" 12
     sampleMetrics := sampleMetrics.insert "infotree_doc_elab_info" 18
     sampleMetrics := sampleMetrics.insert "profile_weight" 1800
+    sampleMetrics := sampleMetrics.insert "profile_weight_source" profileWeightSourceDirect
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
     let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs)
