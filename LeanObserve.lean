@@ -103,6 +103,13 @@ instance : Inhabited NodeAcc := ⟨defaultNodeAcc⟩
 
 instance : Inhabited (NodeAcc × Nat) := ⟨(defaultNodeAcc, 0)⟩
 
+structure DeclShare where
+  node : NodeAcc
+  base : Nat
+  rem : Float
+
+instance : Inhabited DeclShare := ⟨{ node := defaultNodeAcc, base := 0, rem := 0.0 }⟩
+
 structure MetricSpec where
   key : String
   label : String
@@ -878,6 +885,61 @@ where
             acc := acc.push (n, w)
     takeArray (acc.qsort (fun a b => a.snd > b.snd)) topN
 
+@[inline] def distributeFileWeightsToDecls (cmds : Std.HashMap System.FilePath (Array NodeAcc))
+    (fileWeights : Std.HashMap System.FilePath Float) : Std.HashMap System.FilePath (Array NodeAcc) :=
+  Id.run do
+    let mut updated : Std.HashMap System.FilePath (Array NodeAcc) := {}
+    for (path, nodes) in cmds.toList do
+      let w := fileWeights.getD path 0.0
+      if w <= 0.0 then
+        updated := updated.insert path nodes
+      else
+        let mut total : Nat := 0
+        let mut decls : Array DeclShare := #[]
+        for n in nodes do
+          if n.kind == "decl" then
+            let c := n.metrics.getD "infotree_nodes" 0
+            let c := if c == 0 then n.metrics.getD "size" 0 else c
+            let c := if c == 0 then 1 else c
+            total := total + c
+            decls := decls.push { node := n, base := 0, rem := 0.0 }
+        let denom := if total == 0 then decls.size else total
+        let totalNat := floatToNat w
+        let mut withShares : Array DeclShare := #[]
+        for i in [0:decls.size] do
+          let d := decls[i]!
+          let c := d.node.metrics.getD "infotree_nodes" 0
+          let c := if c == 0 then d.node.metrics.getD "size" 0 else c
+          let c := if c == 0 then 1 else c
+          let share := if denom == 0 then 0.0 else (Float.ofNat totalNat) * (Float.ofNat c) / (Float.ofNat denom)
+          let base := (Float.toUInt64 share).toNat
+          let rem := share - (Float.ofNat base)
+          withShares := withShares.push { d with base := base, rem := rem }
+        let totalBase := withShares.foldl (fun acc d => acc + d.base) 0
+        let mut remaining := if totalBase >= totalNat then 0 else totalNat - totalBase
+        let mut sorted := withShares.qsort (fun a b => a.rem > b.rem)
+        let mut i := 0
+        while i < sorted.size && remaining > 0 do
+          let d := sorted[i]!
+          sorted := sorted.set! i { d with base := d.base + 1 }
+          remaining := remaining - 1
+          i := i + 1
+        let mut weightMap : Std.HashMap String Nat := {}
+        for d in sorted do
+          weightMap := weightMap.insert d.node.id d.base
+        let nodes := nodes.map (fun n =>
+          if n.kind != "decl" then
+            n
+          else
+            let prev := n.metrics.getD "profile_weight" 0
+            if prev != 0 then
+              n
+            else
+              let share := weightMap.getD n.id 0
+              if share == 0 then n else { n with metrics := n.metrics.insert "profile_weight" share })
+        updated := updated.insert path nodes
+    return updated
+
 @[inline] def printProfileTop (cfg : ObserveConfig) (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : IO Unit := do
   if cfg.profileJson?.isNone || !cfg.commandNodes then
     return ()
@@ -1194,24 +1256,37 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
   return acc
 
 
-@[inline] def distributeProfilerWeightWith (ctx : CollectContext) (total : Float)
-    (sumWeights : Nat) (weightFor : System.FilePath → Nat) : MetricByFile :=
+@[inline] def distributeProfilerWeightFloatWith (ctx : CollectContext) (total : Float)
+    (sumWeights : Nat) (weightFor : System.FilePath → Nat) : Std.HashMap System.FilePath Float :=
   Id.run do
     let files := ctx.files
     if files.isEmpty then
       return {}
     let nF := Float.ofNat files.size
-    let mut out : MetricByFile := {}
+    let mut out : Std.HashMap System.FilePath Float := {}
     for p in files do
       let weight :=
         if sumWeights == 0 then
           total / nF
         else
           total * (Float.ofNat (weightFor p)) / (Float.ofNat sumWeights)
+      out := out.insert p weight
+    return out
+
+@[inline] def metricByFileFromWeights (ctx : CollectContext)
+    (weights : Std.HashMap System.FilePath Float) : MetricByFile :=
+  Id.run do
+    let mut out : MetricByFile := {}
+    for p in ctx.files do
+      let w := weights.getD p 0.0
       let mut m : MetricMap := {}
-      m := m.insert "profile_weight" (floatToNat weight)
+      m := m.insert "profile_weight" (floatToNat w)
       out := out.insert p m
     return out
+
+@[inline] def distributeProfilerWeightWith (ctx : CollectContext) (total : Float)
+    (sumWeights : Nat) (weightFor : System.FilePath → Nat) : MetricByFile :=
+  metricByFileFromWeights ctx (distributeProfilerWeightFloatWith ctx total sumWeights weightFor)
 
 @[inline] def collectProfiler (ctx : CollectContext) : IO MetricByFile := do
   match ctx.cfg.profileJson? with
@@ -1226,42 +1301,51 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
           let moduleMap := moduleMapFromFiles ctx.root ctx.files
           let declMap := declMapFromNodes cmdMap
           let weights := weightsFromProfiler j moduleMap declMap
+          let mut fileWeights : Std.HashMap System.FilePath Float := {}
+          if !weights.fileWeights.isEmpty then
+            fileWeights := weights.fileWeights
+          let mut appliedDeclWeights := false
           if !weights.declWeights.isEmpty && !cmdMap.isEmpty then
             let mut updated : Std.HashMap System.FilePath (Array NodeAcc) := {}
             for (path, nodes) in cmdMap.toList do
-              let nodes := nodes.map (fun n =>
+              let mut newNodes : Array NodeAcc := #[]
+              for n in nodes do
                 if n.kind == "decl" then
                   let w := weights.declWeights.getD n.name 0.0
-                  if w == 0.0 then n else { n with metrics := n.metrics.insert "profile_weight" (floatToNat w) }
+                  if w == 0.0 then
+                    newNodes := newNodes.push n
+                  else
+                    appliedDeclWeights := true
+                    newNodes := newNodes.push { n with metrics := n.metrics.insert "profile_weight" (floatToNat w) }
                 else
-                  n)
-              updated := updated.insert path nodes
-            ctx.commandNodesRef.set updated
-          if !weights.fileWeights.isEmpty then
-            let mut out : MetricByFile := {}
-            for p in ctx.files do
-              let w := weights.fileWeights.getD p 0.0
-              let mut m : MetricMap := {}
-              m := m.insert "profile_weight" (floatToNat w)
-              out := out.insert p m
-            return out
-          else
-            let infoWeights : Std.HashMap System.FilePath Nat :=
-              Id.run do
-                let mut acc : Std.HashMap System.FilePath Nat := {}
-                for (path, nodes) in cmdMap.toList do
-                  let mut totalNodes := 0
-                  for n in nodes do
-                    totalNodes := totalNodes + (n.metrics.getD "infotree_nodes" 0)
-                  if totalNodes > 0 then
-                    acc := acc.insert path totalNodes
-                return acc
+                  newNodes := newNodes.push n
+              updated := updated.insert path newNodes
+            if appliedDeclWeights then
+              ctx.commandNodesRef.set updated
+          let infoWeights : Std.HashMap System.FilePath Nat :=
+            Id.run do
+              let mut acc : Std.HashMap System.FilePath Nat := {}
+              for (path, nodes) in cmdMap.toList do
+                let mut totalNodes := 0
+                for n in nodes do
+                  totalNodes := totalNodes + (n.metrics.getD "infotree_nodes" 0)
+                if totalNodes > 0 then
+                  acc := acc.insert path totalNodes
+              return acc
+          if fileWeights.isEmpty then
             if !infoWeights.isEmpty then
               let sum := infoWeights.fold (fun acc _ v => acc + v) 0
-              return distributeProfilerWeightWith ctx total sum (fun p => infoWeights.getD p 0)
+              fileWeights := distributeProfilerWeightFloatWith ctx total sum (fun p => infoWeights.getD p 0)
             else
               let totalBuild : Nat := ctx.files.foldl (fun acc p => acc + findBuildTimeMs ctx.buildTimes p) 0
-              return distributeProfilerWeightWith ctx total totalBuild (fun p => findBuildTimeMs ctx.buildTimes p)
+              fileWeights := distributeProfilerWeightFloatWith ctx total totalBuild (fun p => findBuildTimeMs ctx.buildTimes p)
+          if !appliedDeclWeights && !fileWeights.isEmpty && !cmdMap.isEmpty then
+            let updated := distributeFileWeightsToDecls cmdMap fileWeights
+            ctx.commandNodesRef.set updated
+          if !fileWeights.isEmpty then
+            return metricByFileFromWeights ctx fileWeights
+          else
+            return {}
 
 @[inline] def defaultCollectors : Array Collector :=
   #[
