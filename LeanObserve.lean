@@ -448,8 +448,11 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
   | _ :: [] => []
   | x :: rest => x :: dropLastSegment rest
 
+@[inline] def funcNameCandidate (name : String) : String :=
+  (lastSegment (name.splitOn ":")).trimAscii.toString
+
 @[inline] def moduleFromFuncName (name : String) : Option String :=
-  let candidate := (lastSegment (name.splitOn ":")).trimAscii.toString
+  let candidate := funcNameCandidate name
   if !candidate.contains '.' then
     none
   else
@@ -458,8 +461,12 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
     let modName := String.intercalate "." modParts
     if modName.isEmpty then none else some modName
 
+@[inline] def declFullFromFuncName (name : String) : Option String :=
+  let candidate := funcNameCandidate name
+  if candidate.isEmpty then none else some candidate
+
 @[inline] def declFromFuncName (name : String) : Option String :=
-  let candidate := (lastSegment (name.splitOn ":")).trimAscii.toString
+  let candidate := funcNameCandidate name
   if candidate.isEmpty then
     none
   else if candidate.contains '.' then
@@ -474,16 +481,26 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
   let prev := m.getD path 0.0
   m.insert path (prev + w)
 
+@[inline] def addDeclWeight (m : Std.HashMap String Float) (name : String)
+    (w : Float) : Std.HashMap String Float :=
+  let prev := m.getD name 0.0
+  m.insert name (prev + w)
+
+structure ProfilerWeights where
+  fileWeights : Std.HashMap System.FilePath Float := {}
+  declWeights : Std.HashMap String Float := {}
+
 @[inline] def weightsFromProfiler (j : Json) (moduleMap : Std.HashMap String System.FilePath)
-    (declMap : Std.HashMap String System.FilePath) : Std.HashMap System.FilePath Float :=
+    (declMap : Std.HashMap String System.FilePath) : ProfilerWeights :=
   match jsonGetObj? j with
-  | none => {}
+  | none => { fileWeights := {}, declWeights := {} }
   | some obj =>
       match jsonGetField? obj "threads" >>= jsonGetArr? with
-      | none => {}
+      | none => { fileWeights := {}, declWeights := {} }
       | some threads =>
           Id.run do
-            let mut out : Std.HashMap System.FilePath Float := {}
+            let mut outFiles : Std.HashMap System.FilePath Float := {}
+            let mut outDecls : Std.HashMap String Float := {}
             for thread in threads do
               match jsonGetObj? thread with
               | none => pure ()
@@ -527,23 +544,30 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
                                         match moduleFromFuncName funcName with
                                         | some modName =>
                                             match moduleMap.get? modName with
-                                            | some path => out := addWeight out path weight
+                                            | some path => outFiles := addWeight outFiles path weight
                                             | none =>
-                                                match declFromFuncName funcName with
+                                                match declFullFromFuncName funcName with
                                                 | some decl =>
                                                     match declMap.get? decl with
-                                                    | some path => out := addWeight out path weight
+                                                    | some path => outFiles := addWeight outFiles path weight
                                                     | none => pure ()
                                                 | none => pure ()
                                         | none =>
-                                            match declFromFuncName funcName with
+                                            match declFullFromFuncName funcName with
                                             | some decl =>
                                                 match declMap.get? decl with
-                                                | some path => out := addWeight out path weight
+                                                | some path => outFiles := addWeight outFiles path weight
                                                 | none => pure ()
                                             | none => pure ()
+                                        match declFullFromFuncName funcName with
+                                        | some decl =>
+                                            if declMap.contains decl then
+                                              outDecls := addDeclWeight outDecls decl weight
+                                            else
+                                              pure ()
+                                        | none => pure ()
                     | _, _ => pure ()
-            return out
+            return { fileWeights := outFiles, declWeights := outDecls }
 
 @[inline] def floatToNat (f : Float) : Nat :=
   if f <= 0.0 then 0 else (Float.toUInt64 f).toNat
@@ -1125,10 +1149,21 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
           let moduleMap := moduleMapFromFiles ctx.root ctx.files
           let declMap := declMapFromNodes cmdMap
           let weights := weightsFromProfiler j moduleMap declMap
-          if !weights.isEmpty then
+          if !weights.declWeights.isEmpty && !cmdMap.isEmpty then
+            let mut updated : Std.HashMap System.FilePath (Array NodeAcc) := {}
+            for (path, nodes) in cmdMap.toList do
+              let nodes := nodes.map (fun n =>
+                if n.kind == "decl" then
+                  let w := weights.declWeights.getD n.name 0.0
+                  if w == 0.0 then n else { n with metrics := n.metrics.insert "profile_weight" (floatToNat w) }
+                else
+                  n)
+              updated := updated.insert path nodes
+            ctx.commandNodesRef.set updated
+          if !weights.fileWeights.isEmpty then
             let mut out : MetricByFile := {}
             for p in ctx.files do
-              let w := weights.getD p 0.0
+              let w := weights.fileWeights.getD p 0.0
               let mut m : MetricMap := {}
               m := m.insert "profile_weight" (floatToNat w)
               out := out.insert p m
