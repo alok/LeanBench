@@ -20,6 +20,7 @@ open LeanBench
   reportJson? := none
   reportMd? := none
   reportTop := 30
+  entriesOut? := none
 }
 
 @[inline] def mkObserveBenchCfg (tags : List String) (samples : Nat) : BenchConfig := {
@@ -46,5 +47,10 @@ bench "observe/infotree_cmdnodes_small" (mkObserveBenchCfg ["infotree", "command
 
 bench "observe/decl_nodes_small" (mkObserveBenchCfg ["infotree", "decl-nodes"] 2) do
   let cfg := mkObserveCfg true true true
+  let _ ← artifactJson cfg "bench"
+  pure ()
+
+bench "observe/entries_small" (mkObserveBenchCfg ["textscan", "entries"] 2) do
+  let cfg := { (mkObserveCfg false false false) with entriesOut? := some "/tmp/leanobserve_entries_bench.json" }
   let _ ← artifactJson cfg "bench"
   pure ()

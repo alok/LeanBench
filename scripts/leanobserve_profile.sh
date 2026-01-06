@@ -10,6 +10,7 @@ mkdir -p "$out_dir"
 profile_json="$out_dir/trace-profiler.json"
 build_log="$out_dir/build.log"
 metrics_json="$out_dir/metrics.json"
+entries_json="$out_dir/entries.json"
 
 lakefile_src="$(pwd)/lakefile.toml"
 tmp_lakefile="$out_dir/lakefile.profile.toml"
@@ -34,6 +35,8 @@ lake build leanobserve
   --build-log "$build_log" \
   --profile-json "$profile_json" \
   --out "$metrics_json" \
+  --entries-out "$entries_json" \
   "$@"
 
 echo "wrote $metrics_json"
+echo "wrote $entries_json"

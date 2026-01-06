@@ -23,6 +23,7 @@ structure ObserveConfig where
   reportJson? : Option String := none
   reportMd? : Option String := none
   reportTop : Nat := 30
+  entriesOut? : Option String := none
 
 @[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
   Id.run do
@@ -64,6 +65,9 @@ structure ObserveConfig where
     | none => pure ()
     match p.flag? "report-top" with
     | some f => cfg := { cfg with reportTop := f.as! Nat }
+    | none => pure ()
+    match p.flag? "entries-out" with
+    | some f => cfg := { cfg with entriesOut? := some (f.as! String) }
     | none => pure ()
     return cfg
 
@@ -786,6 +790,36 @@ where
       IO.FS.writeFile (System.FilePath.mk path) (reportToMarkdown report)
   | none => pure ()
 
+@[inline] def rootLabel (root : System.FilePath) : String :=
+  match root.components.reverse with
+  | [] => root.toString
+  | c :: _ => c
+
+@[inline] def entryPath (root path : System.FilePath) : String :=
+  let comps := relativeComponents root path
+  String.intercalate "/" (rootLabel root :: comps)
+
+partial def collectFileNodes (node : NodeAcc) : List NodeAcc :=
+  if node.isFile then
+    [node]
+  else
+    node.children.foldr (fun child acc => collectFileNodes child ++ acc) []
+
+@[inline] def entriesJsonFrom (root : System.FilePath) (node : NodeAcc) : Json :=
+  let entries :=
+    collectFileNodes node |>.map (fun leaf =>
+      Json.mkObj
+        [ ("path", Json.str (entryPath root leaf.path))
+        , ("series", metricsJsonFrom leaf.metrics)
+        ])
+  Json.mkObj [("entries", Json.arr entries.toArray)]
+
+@[inline] def writeEntries (cfg : ObserveConfig) (root : System.FilePath) (rootAcc : NodeAcc) : IO Unit := do
+  match cfg.entriesOut? with
+  | some path =>
+      IO.FS.writeFile (System.FilePath.mk path) (toString <| entriesJsonFrom root rootAcc)
+  | none => pure ()
+
 partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : NodeAcc :=
   if node.isFile then
     match cmds.get? node.path with
@@ -1199,6 +1233,7 @@ def registerCollector (c : Collector) : IO Unit :=
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
     let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs)
     writeReport cfg rootAcc specs generatedAt
+    writeEntries cfg rootPath rootAcc
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
@@ -1232,6 +1267,7 @@ def registerCollector (c : Collector) : IO Unit :=
   let cmdMap ← commandNodesRef.get
   rootAcc := attachCommandNodes rootAcc cmdMap
   writeReport cfg rootAcc specs generatedAt
+  writeEntries cfg root rootAcc
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
     , ("generated_at", Json.str generatedAt)
@@ -1276,6 +1312,7 @@ def registerCollector (c : Collector) : IO Unit :=
     "report-json" : String; "Write agent report JSON to path (optional)"
     "report-md" : String; "Write agent report Markdown to path (optional)"
     "report-top" : Nat; "Top N items per metric in report (default: 30)"
+    "entries-out" : String; "Write entries schema JSON to path (optional)"
     sample; "Emit sample metrics values"
 ]
 
