@@ -1,0 +1,368 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/alok/LeanBench/runtime-metrics-schema.json",
+  "title": "LeanBench Runtime Metrics Schema",
+  "description": "Vendor-neutral schema for importing CPU/GPU runtime profiling data into LeanBench. Supports perf, Instruments, NSight, Tracy, and custom profilers.",
+  "version": "0.1.0",
+  "type": "object",
+  "required": ["schema_version", "source"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version for compatibility checking",
+      "const": "0.1.0"
+    },
+    "source": {
+      "type": "object",
+      "description": "Profiler source information",
+      "required": ["tool"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Profiler tool name",
+          "enum": ["perf", "instruments", "nsight", "tracy", "dtrace", "custom"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Tool version"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Platform identifier",
+          "enum": ["linux", "macos", "windows"]
+        },
+        "capture_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp of capture"
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "description": "Hardware device information (CPU/GPU)",
+      "properties": {
+        "cpu": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "cores": { "type": "integer" },
+            "threads": { "type": "integer" },
+            "frequency_mhz": { "type": "number" }
+          }
+        },
+        "gpu": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "vendor": {
+              "type": "string",
+              "enum": ["apple", "nvidia", "amd", "intel", "other"]
+            },
+            "compute_units": { "type": "integer" },
+            "memory_bytes": { "type": "integer" },
+            "peak_bandwidth_gbps": { "type": "number" }
+          }
+        }
+      }
+    },
+    "cpu_samples": {
+      "type": "array",
+      "description": "CPU profiling samples (from perf, Instruments Time Profiler, etc.)",
+      "items": {
+        "type": "object",
+        "required": ["symbol"],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Function/symbol name (may be mangled)"
+          },
+          "lean_decl": {
+            "type": "string",
+            "description": "Mapped Lean declaration name (e.g., 'Lean.Elab.Term.elabTerm')"
+          },
+          "file": {
+            "type": "string",
+            "description": "Source file path"
+          },
+          "line": {
+            "type": "integer",
+            "description": "Line number in source file"
+          },
+          "samples": {
+            "type": "integer",
+            "description": "Number of samples hitting this location"
+          },
+          "time_ns": {
+            "type": "number",
+            "description": "Estimated time in nanoseconds"
+          },
+          "cycles": {
+            "type": "integer",
+            "description": "CPU cycles (from perf)"
+          },
+          "instructions": {
+            "type": "integer",
+            "description": "Instructions executed (from perf)"
+          },
+          "cache_misses": {
+            "type": "integer",
+            "description": "L1/L2/L3 cache misses"
+          },
+          "branch_misses": {
+            "type": "integer",
+            "description": "Branch mispredictions"
+          }
+        }
+      }
+    },
+    "cpu_counters": {
+      "type": "object",
+      "description": "Aggregate CPU hardware counters (from perf stat)",
+      "properties": {
+        "total_cycles": { "type": "integer" },
+        "total_instructions": { "type": "integer" },
+        "ipc": { "type": "number", "description": "Instructions per cycle" },
+        "cache_misses": { "type": "integer" },
+        "branch_misses": { "type": "integer" },
+        "context_switches": { "type": "integer" },
+        "page_faults": { "type": "integer" }
+      }
+    },
+    "gpu_kernels": {
+      "type": "array",
+      "description": "GPU kernel executions (from Metal GPU trace, NSight, etc.)",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Kernel function name"
+          },
+          "lean_decl": {
+            "type": "string",
+            "description": "Mapped Lean declaration (via @[extern] annotation)"
+          },
+          "file": {
+            "type": "string",
+            "description": "Source file path"
+          },
+          "line": {
+            "type": "integer",
+            "description": "Line number"
+          },
+          "stream": {
+            "type": "integer",
+            "description": "GPU stream/queue index"
+          },
+          "start_ns": {
+            "type": "number",
+            "description": "Start timestamp in nanoseconds"
+          },
+          "duration_ns": {
+            "type": "number",
+            "description": "Execution duration in nanoseconds"
+          },
+          "grid_size": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "[x, y, z] grid dimensions"
+          },
+          "block_size": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "[x, y, z] block/threadgroup dimensions"
+          },
+          "registers_per_thread": {
+            "type": "integer"
+          },
+          "shared_memory_bytes": {
+            "type": "integer"
+          },
+          "occupancy_percent": {
+            "type": "number",
+            "description": "SM/compute unit occupancy (0-100)"
+          },
+          "memory_read_bytes": {
+            "type": "integer",
+            "description": "Global memory read"
+          },
+          "memory_write_bytes": {
+            "type": "integer",
+            "description": "Global memory written"
+          },
+          "achieved_bandwidth_gbps": {
+            "type": "number",
+            "description": "Achieved memory bandwidth"
+          },
+          "flops": {
+            "type": "integer",
+            "description": "Floating point operations"
+          }
+        }
+      }
+    },
+    "gpu_memory_events": {
+      "type": "array",
+      "description": "GPU memory allocation/deallocation events",
+      "items": {
+        "type": "object",
+        "required": ["type", "bytes"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["alloc", "free", "transfer_h2d", "transfer_d2h", "transfer_d2d"]
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "timestamp_ns": {
+            "type": "number"
+          },
+          "lean_decl": {
+            "type": "string",
+            "description": "Lean declaration that triggered this event"
+          },
+          "address": {
+            "type": "string",
+            "description": "Memory address (hex string)"
+          }
+        }
+      }
+    },
+    "memory_events": {
+      "type": "array",
+      "description": "CPU heap allocation events (Blow 'Allocs' style)",
+      "items": {
+        "type": "object",
+        "required": ["type", "bytes"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["alloc", "free", "realloc"]
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "timestamp_ns": {
+            "type": "number"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Allocating function"
+          },
+          "lean_decl": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ffi_calls": {
+      "type": "array",
+      "description": "FFI call timings (from Lean FFI instrumentation)",
+      "items": {
+        "type": "object",
+        "required": ["extern_name"],
+        "properties": {
+          "extern_name": {
+            "type": "string",
+            "description": "Lean @[extern] name"
+          },
+          "lean_decl": {
+            "type": "string",
+            "description": "Full Lean declaration path"
+          },
+          "call_count": {
+            "type": "integer"
+          },
+          "total_time_ns": {
+            "type": "number"
+          },
+          "min_time_ns": {
+            "type": "number"
+          },
+          "max_time_ns": {
+            "type": "number"
+          },
+          "avg_time_ns": {
+            "type": "number"
+          },
+          "gpu_kernel": {
+            "type": "string",
+            "description": "Associated GPU kernel name if this FFI launches GPU work"
+          }
+        }
+      }
+    },
+    "frames": {
+      "type": "array",
+      "description": "Frame-by-frame data for time-series visualization (Tracy style)",
+      "items": {
+        "type": "object",
+        "required": ["frame_id"],
+        "properties": {
+          "frame_id": {
+            "type": "integer"
+          },
+          "start_ns": {
+            "type": "number"
+          },
+          "duration_ns": {
+            "type": "number"
+          },
+          "cpu_time_ns": {
+            "type": "number"
+          },
+          "gpu_time_ns": {
+            "type": "number"
+          },
+          "cpu_samples": {
+            "type": "integer"
+          },
+          "gpu_kernel_count": {
+            "type": "integer"
+          },
+          "memory_alloc_bytes": {
+            "type": "integer"
+          },
+          "memory_free_bytes": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "aggregated": {
+      "type": "object",
+      "description": "Pre-aggregated metrics by file/declaration for direct import",
+      "properties": {
+        "by_file": {
+          "type": "object",
+          "description": "Metrics keyed by file path",
+          "additionalProperties": {
+            "type": "object",
+            "description": "Metric key -> value",
+            "additionalProperties": { "type": "number" }
+          }
+        },
+        "by_decl": {
+          "type": "object",
+          "description": "Metrics keyed by Lean declaration name",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}
