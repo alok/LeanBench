@@ -15,3 +15,4 @@
 /radar/config-runner.yaml
 /radar/state/
 /radar/cache/
+/visualizer/node_modules/
