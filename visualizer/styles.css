@@ -38,6 +38,71 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* View tabs */
+.view-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 24px;
+}
+
+.view-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-tab:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.view-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* View containers */
+.view-container {
+  position: relative;
+}
+
+/* Category toggle */
+.category-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.category-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.category-btn:hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+
+.category-btn.active {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
 }
 
 .badge {
@@ -293,6 +358,125 @@ body {
   font-size: 11px;
   fill: rgba(255, 255, 255, 0.75);
   pointer-events: none;
+}
+
+/* Timeline view */
+.timeline-header,
+.allocs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-header h3,
+.allocs-header h3 {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+.timeline-controls,
+.allocs-controls {
+  display: flex;
+  gap: 12px;
+}
+
+#timeline,
+#allocs {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  min-height: 60vh;
+  position: relative;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+/* Gantt chart bars */
+.kernel-bar {
+  rx: 4;
+  cursor: pointer;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1px;
+  transition: opacity 0.15s ease;
+}
+
+.kernel-bar:hover {
+  opacity: 0.8;
+}
+
+/* Memory chart */
+.alloc-line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.alloc-area {
+  opacity: 0.3;
+}
+
+.alloc-event {
+  cursor: pointer;
+}
+
+.alloc-event.alloc {
+  fill: #81c784;
+}
+
+.alloc-event.free {
+  fill: #ef5350;
+}
+
+/* Optgroup styling for metric selectors */
+.control select optgroup {
+  font-weight: 600;
+  font-style: normal;
+  color: var(--accent);
+  background: var(--panel);
+  padding: 8px 0 4px 0;
+}
+
+.control select option {
+  font-weight: 400;
+  color: var(--text);
+  background: var(--panel-2);
+  padding: 4px 8px;
+}
+
+/* Metric group badges */
+.metric-group-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.metric-group-badge.cpu {
+  background: rgba(75, 213, 255, 0.2);
+  color: var(--accent-2);
+}
+
+.metric-group-badge.gpu {
+  background: rgba(255, 122, 89, 0.2);
+  color: var(--accent);
+}
+
+.metric-group-badge.memory {
+  background: rgba(129, 199, 132, 0.2);
+  color: #81c784;
+}
+
+.metric-group-badge.ffi {
+  background: rgba(186, 104, 200, 0.2);
+  color: #ba68c8;
 }
 
 @media (max-width: 900px) {

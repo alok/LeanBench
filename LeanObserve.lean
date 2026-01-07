@@ -3,6 +3,7 @@ import Lean
 import Std
 import LeanBench.TextScan
 import LeanBench.ParsecScan
+import LeanBench.Runtime
 
 open Cli
 open Lean
@@ -24,6 +25,16 @@ structure ObserveConfig where
   reportMd? : Option String := none
   reportTop : Nat := 30
   entriesOut? : Option String := none
+  -- Runtime profiling imports
+  perfScript? : Option String := none
+  perfStat? : Option String := none
+  instrumentsTrace? : Option String := none
+  metalTrace? : Option String := none
+  gpuJson? : Option String := none
+  cudaKernels? : Option String := none
+  cudaApi? : Option String := none
+  tracyTrace? : Option String := none
+  dtraceOutput? : Option String := none
 
 @[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
   Id.run do
@@ -68,6 +79,34 @@ structure ObserveConfig where
     | none => pure ()
     match p.flag? "entries-out" with
     | some f => cfg := { cfg with entriesOut? := some (f.as! String) }
+    | none => pure ()
+    -- Runtime profiling flags
+    match p.flag? "perf" with
+    | some f => cfg := { cfg with perfScript? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "perf-stat" with
+    | some f => cfg := { cfg with perfStat? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "instruments" with
+    | some f => cfg := { cfg with instrumentsTrace? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "metal" with
+    | some f => cfg := { cfg with metalTrace? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "gpu-json" with
+    | some f => cfg := { cfg with gpuJson? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "cuda" with
+    | some f => cfg := { cfg with cudaKernels? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "cuda-api" with
+    | some f => cfg := { cfg with cudaApi? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "tracy" with
+    | some f => cfg := { cfg with tracyTrace? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "dtrace" with
+    | some f => cfg := { cfg with dtraceOutput? := some (f.as! String) }
     | none => pure ()
     return cfg
 
@@ -631,8 +670,7 @@ structure ProfilerWeights where
                     | _, _ => pure ()
             return { fileWeights := outFiles, declWeights := outDecls }
 
-@[inline] def floatToNat (f : Float) : Nat :=
-  if f <= 0.0 then 0 else (Float.toUInt64 f).toNat
+-- floatToNat is defined in TextScan.lean
 
 @[inline] def findBuildTimeMs (entries : Std.HashMap String Nat) (path : System.FilePath) : Nat :=
   let p := path.toString
@@ -1247,6 +1285,56 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
     { key := "infotree_doc_elab_info", label := "Doc elab info nodes", kind := "count", unit := "nodes", group := "infotree" }
   ]
 
+  /-- CPU profiling metrics (perf, Instruments, Tracy). -/
+  def cpuSpecs : Array MetricSpec := #[
+    { key := "cpu_time_ns", label := "CPU Time", kind := "time_ns", unit := "ns", group := "cpu",
+      defaultBlendWeight := 80 },
+    { key := "cpu_samples", label := "CPU Samples", kind := "count", unit := "samples", group := "cpu",
+      defaultBlendWeight := 60 },
+    { key := "cpu_cycles", label := "CPU Cycles", kind := "count", unit := "cycles", group := "cpu" },
+    { key := "cpu_instructions", label := "Instructions", kind := "count", unit := "instrs", group := "cpu" },
+    { key := "cpu_cache_misses", label := "Cache Misses", kind := "count", unit := "misses", group := "cpu",
+      defaultBlendWeight := 40 },
+    { key := "cpu_branch_misses", label := "Branch Misses", kind := "count", unit := "misses", group := "cpu" },
+    { key := "cpu_ipc_bp", label := "Instructions/Cycle", kind := "ratio_bp", unit := "bp", group := "cpu" }
+  ]
+
+  /-- GPU kernel execution metrics (Metal, CUDA, generic). -/
+  def gpuSpecs : Array MetricSpec := #[
+    { key := "gpu_kernel_time_ns", label := "GPU Kernel Time", kind := "time_ns", unit := "ns", group := "gpu",
+      defaultBlendWeight := 80 },
+    { key := "gpu_kernel_count", label := "Kernel Launches", kind := "count", unit := "launches", group := "gpu",
+      defaultBlendWeight := 50 },
+    { key := "gpu_memory_read_bytes", label := "GPU Memory Read", kind := "bytes", unit := "bytes", group := "gpu" },
+    { key := "gpu_memory_write_bytes", label := "GPU Memory Write", kind := "bytes", unit := "bytes", group := "gpu" },
+    { key := "gpu_occupancy_bp", label := "SM Occupancy", kind := "ratio_bp", unit := "bp", group := "gpu",
+      defaultBlendWeight := 30 },
+    { key := "gpu_bandwidth_gbps_bp", label := "Memory Bandwidth", kind := "rate_bp", unit := "bp", group := "gpu" },
+    { key := "gpu_compute_util_bp", label := "Compute Utilization", kind := "ratio_bp", unit := "bp", group := "gpu" }
+  ]
+
+  /-- Memory allocation metrics (Blow "Allocs" style). -/
+  def memorySpecs : Array MetricSpec := #[
+    { key := "alloc_count", label := "Allocations", kind := "count", unit := "allocs", group := "memory",
+      defaultBlendWeight := 40 },
+    { key := "free_count", label := "Frees", kind := "count", unit := "frees", group := "memory" },
+    { key := "alloc_bytes", label := "Allocated Bytes", kind := "bytes", unit := "bytes", group := "memory",
+      defaultBlendWeight := 50 },
+    { key := "peak_memory_bytes", label := "Peak Memory", kind := "bytes", unit := "bytes", group := "memory" },
+    { key := "live_allocs", label := "Live Allocations", kind := "count", unit := "allocs", group := "memory" }
+  ]
+
+  /-- FFI call metrics. -/
+  def ffiSpecs : Array MetricSpec := #[
+    { key := "ffi_call_count", label := "FFI Calls", kind := "count", unit := "calls", group := "ffi",
+      defaultBlendWeight := 30 },
+    { key := "ffi_time_ns", label := "FFI Time", kind := "time_ns", unit := "ns", group := "ffi",
+      defaultBlendWeight := 50 }
+  ]
+
+  /-- All runtime profiling specs (CPU + GPU + memory + FFI). -/
+  def runtimeSpecs : Array MetricSpec := cpuSpecs ++ gpuSpecs ++ memorySpecs ++ ffiSpecs
+
 initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
 
 @[inline] def ensureSearchPath : IO Unit := do
@@ -1415,11 +1503,57 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
           else
             return {}
 
+/-- Runtime collector - imports CPU/GPU/memory metrics from external profiler data. -/
+@[inline] def collectRuntime (ctx : CollectContext) : IO MetricByFile := do
+  let mut acc : MetricByFile := {}
+
+  -- Import Linux perf data
+  if ctx.cfg.perfScript?.isSome || ctx.cfg.perfStat?.isSome then
+    let scriptPath := ctx.cfg.perfScript?.map System.FilePath.mk
+    let statPath := ctx.cfg.perfStat?.map System.FilePath.mk
+    let perf ← LeanBench.Runtime.collectFromPerf scriptPath statPath
+    acc := mergeByFile acc perf
+
+  -- Import macOS Instruments trace
+  if let some path := ctx.cfg.instrumentsTrace? then
+    let inst ← LeanBench.Runtime.collectFromInstruments ⟨path⟩
+    acc := mergeByFile acc inst
+
+  -- Import Metal GPU trace
+  if let some path := ctx.cfg.metalTrace? then
+    let metal ← LeanBench.Runtime.collectFromMetal ⟨path⟩
+    acc := mergeByFile acc metal
+
+  -- Import vendor-neutral GPU JSON
+  if let some path := ctx.cfg.gpuJson? then
+    let gpu ← LeanBench.Runtime.collectFromRuntimeJson ⟨path⟩
+    acc := mergeByFile acc gpu
+
+  -- Import CUDA/NSight data
+  if ctx.cfg.cudaKernels?.isSome || ctx.cfg.cudaApi?.isSome then
+    let kernelPath := ctx.cfg.cudaKernels?.map System.FilePath.mk
+    let apiPath := ctx.cfg.cudaApi?.map System.FilePath.mk
+    let cuda ← LeanBench.Runtime.collectFromNsight kernelPath apiPath
+    acc := mergeByFile acc cuda
+
+  -- Import Tracy profiler data
+  if let some path := ctx.cfg.tracyTrace? then
+    let tracy ← LeanBench.Runtime.collectFromTracy ⟨path⟩
+    acc := mergeByFile acc tracy
+
+  -- Import macOS DTrace data
+  if let some path := ctx.cfg.dtraceOutput? then
+    let dtrace ← LeanBench.Runtime.collectFromDTrace ⟨path⟩
+    acc := mergeByFile acc dtrace
+
+  return acc
+
 @[inline] def defaultCollectors : Array Collector :=
   #[
     { id := "text-scan", specs := textScanSpecs, collect := collectTextScan },
     { id := "infotree", specs := infoTreeSpecs, collect := collectInfoTree },
-    { id := "profiler", specs := profileSpecs, collect := collectProfiler }
+    { id := "profiler", specs := profileSpecs, collect := collectProfiler },
+    { id := "runtime", specs := runtimeSpecs, collect := collectRuntime }
   ]
 
 initialize collectorRegistry : IO.Ref (Array Collector) ← IO.mkRef defaultCollectors
@@ -1434,6 +1568,7 @@ def registerCollector (c : Collector) : IO Unit :=
   if id == "text-scan" then 10
   else if id == "infotree" then 20
   else if id == "profiler" then 30
+  else if id == "runtime" then 40
   else 100
 
 @[inline] def collectAllMetrics (ctx : CollectContext) : IO MetricByFile := do
@@ -1496,7 +1631,7 @@ def registerCollector (c : Collector) : IO Unit :=
     sampleMetrics := sampleMetrics.insert "profile_weight_source" profileWeightSourceDirect
     let rootPath := System.FilePath.mk cfg.root
     let rootAcc : NodeAcc := { (emptyNode "root" rootPath) with metrics := sampleMetrics }
-    let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs)
+    let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs ++ runtimeSpecs)
     writeReport cfg rootAcc specs generatedAt
     writeEntries cfg rootPath rootAcc
     printProfileTop cfg {}
@@ -1581,6 +1716,15 @@ def registerCollector (c : Collector) : IO Unit :=
     "report-top" : Nat; "Top N items per metric in report (default: 30)"
     "entries-out" : String; "Write entries schema JSON to path (optional)"
     sample; "Emit sample metrics values"
+    perf : String; "Import Linux perf script output (perf script > file.txt)"
+    "perf-stat" : String; "Import Linux perf stat output (perf stat ... 2> file.txt)"
+    instruments : String; "Import macOS Instruments trace XML (xcrun xctrace export)"
+    metal : String; "Import Metal System Trace XML"
+    "gpu-json" : String; "Import vendor-neutral GPU metrics JSON"
+    cuda : String; "Import CUDA/NSight kernel JSON (nsys stats --report gpukernsum --format json)"
+    "cuda-api" : String; "Import CUDA/NSight API JSON (nsys stats --report cudaapisum --format json)"
+    tracy : String; "Import Tracy profiler CSV (tracy-csvexport capture.tracy)"
+    dtrace : String; "Import macOS DTrace output"
 ]
 
 def runLeanObserve (args : List String) : IO UInt32 :=

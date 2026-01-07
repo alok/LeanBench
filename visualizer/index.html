@@ -13,7 +13,12 @@
     <header class="topbar">
       <div class="brand">
         <div class="badge">Lean Observatory</div>
-        <div class="title">Treemap Explorer</div>
+        <div class="title">Metrics Explorer</div>
+        <nav class="view-tabs">
+          <button class="view-tab active" data-view="treemap">Treemap</button>
+          <button class="view-tab" data-view="timeline">Timeline</button>
+          <button class="view-tab" data-view="allocs">Allocs</button>
+        </nav>
       </div>
       <div class="controls">
         <label class="control">
@@ -24,6 +29,14 @@
           <span>Root Path (for editor links)</span>
           <input id="rootInput" type="text" placeholder="/abs/path/to/project" />
         </label>
+        <div class="control">
+          <span>Metric Category</span>
+          <div class="category-toggle" id="categoryToggle">
+            <button class="category-btn active" data-category="all">All</button>
+            <button class="category-btn" data-category="compile">Compile</button>
+            <button class="category-btn" data-category="runtime">Runtime</button>
+          </div>
+        </div>
         <label class="control">
           <span>Size Metric</span>
           <select id="sizeSelect"></select>
@@ -44,9 +57,46 @@
     </header>
 
     <main class="panel">
-      <section class="canvas">
+      <!-- Treemap View -->
+      <section class="canvas view-container" id="treemapView">
         <div id="treemap"></div>
         <div id="tooltip" class="tooltip" hidden></div>
+      </section>
+
+      <!-- Timeline View (GPU kernel Gantt chart) -->
+      <section class="canvas view-container" id="timelineView" hidden>
+        <div class="timeline-header">
+          <h3>GPU Kernel Timeline</h3>
+          <div class="timeline-controls">
+            <label class="control">
+              <span>Color By</span>
+              <select id="timelineColorBy">
+                <option value="kernel">Kernel Name</option>
+                <option value="stream">Stream</option>
+                <option value="duration">Duration</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="timeline"></div>
+      </section>
+
+      <!-- Allocs View (Memory waterfall) -->
+      <section class="canvas view-container" id="allocsView" hidden>
+        <div class="allocs-header">
+          <h3>Memory Allocations</h3>
+          <div class="allocs-controls">
+            <label class="control">
+              <span>Group By</span>
+              <select id="allocsGroupBy">
+                <option value="time">Time</option>
+                <option value="file">File</option>
+                <option value="decl">Declaration</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="allocs"></div>
       </section>
       <aside class="inspector">
         <div class="inspector-card">

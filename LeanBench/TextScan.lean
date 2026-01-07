@@ -358,3 +358,62 @@ def freeSuffixNames : List Lean.Name :=
     m := m.insert "call_distinct" acc.callNames.size
     m := m.insert "build_time_ms" buildTimeMs
     return m
+
+/-! ## Extended metric types for runtime profiling
+
+Float-based metrics are used during import from external profilers (perf, Instruments, NSight).
+They are converted to basis points (Nat) for storage and visualization.
+-/
+
+/-- Float metric map for importing from external profilers. -/
+abbrev MetricMapF := Std.HashMap MetricKey Float
+
+/-- Float metrics by file. -/
+abbrev MetricByFileF := Std.HashMap System.FilePath MetricMapF
+
+/-- Convert a float ratio (0.0 to 1.0) to basis points (0 to 10000). -/
+@[inline] def ratioToBp (ratio : Float) : Nat :=
+  (ratio * 10000.0).toUInt64.toNat
+
+/-- Convert basis points back to ratio. -/
+@[inline] def bpToRatio (bp : Nat) : Float :=
+  bp.toFloat / 10000.0
+
+/-- Convert a float count to Nat, rounding. -/
+@[inline] def floatToNat (f : Float) : Nat :=
+  f.toUInt64.toNat
+
+/-- Convert nanoseconds to Nat. -/
+@[inline] def nsToNat (ns : Float) : Nat :=
+  ns.toUInt64.toNat
+
+/-- Convert bandwidth (GB/s) to basis points relative to a baseline (e.g. 1000 GB/s = 10000 bp). -/
+@[inline] def bandwidthToBp (gbps : Float) (baselineGbps : Float := 1000.0) : Nat :=
+  ratioToBp (gbps / baselineGbps)
+
+/-- Convert IPC (instructions per cycle) to basis points (1.0 IPC = 10000 bp). -/
+@[inline] def ipcToBp (ipc : Float) : Nat :=
+  (ipc * 10000.0).toUInt64.toNat
+
+/-- Merge a float metric map into a Nat metric map, applying conversion based on key suffix. -/
+@[inline] def mergeMetricMapF (base : MetricMap) (floats : MetricMapF) : MetricMap :=
+  floats.fold (fun acc key val =>
+    let natVal :=
+      if key.endsWith "_bp" || key.endsWith "_ratio_bp" then
+        ratioToBp val
+      else if key.endsWith "_ns" then
+        nsToNat val
+      else
+        floatToNat val
+    acc.insert key natVal
+  ) base
+
+/-- Merge float metrics by file into Nat metrics by file. -/
+@[inline] def mergeMetricByFileF (base : MetricByFile) (floats : MetricByFileF) : MetricByFile :=
+  floats.fold (fun acc path fmap =>
+    let existing := acc.getD path {}
+    acc.insert path (mergeMetricMapF existing fmap)
+  ) base
+
+/-- Empty float metric map. -/
+@[inline] def emptyMetricMapF : MetricMapF := {}
