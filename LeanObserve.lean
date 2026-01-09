@@ -66,9 +66,9 @@ structure ObserveConfig where
     | some f => cfg := { cfg with infoTreeJobs := f.as! Nat }
     | none => pure ()
     if p.hasFlag "command-nodes" then
-      cfg := { cfg with commandNodes := true }
+      cfg := { cfg with commandNodes := true, infoTree := true }
     if p.hasFlag "decl-nodes" then
-      cfg := { cfg with commandNodes := true, declNodesOnly := true }
+      cfg := { cfg with commandNodes := true, declNodesOnly := true, infoTree := true }
     match p.flag? "report-json" with
     | some f => cfg := { cfg with reportJson? := some (f.as! String) }
     | none => pure ()
@@ -112,6 +112,8 @@ structure ObserveConfig where
     match p.flag? "dtrace" with
     | some f => cfg := { cfg with dtraceOutput? := some (f.as! String) }
     | none => pure ()
+    if cfg.spansOut?.isSome then
+      cfg := { cfg with commandNodes := true, infoTree := true }
     return cfg
 
 structure NodeSpan where
