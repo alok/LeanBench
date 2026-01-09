@@ -25,6 +25,7 @@ structure ObserveConfig where
   reportMd? : Option String := none
   reportTop : Nat := 30
   entriesOut? : Option String := none
+  spansOut? : Option String := none
   -- Runtime profiling imports
   perfScript? : Option String := none
   perfStat? : Option String := none
@@ -79,6 +80,9 @@ structure ObserveConfig where
     | none => pure ()
     match p.flag? "entries-out" with
     | some f => cfg := { cfg with entriesOut? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "spans-out" with
+    | some f => cfg := { cfg with spansOut? := some (f.as! String) }
     | none => pure ()
     -- Runtime profiling flags
     match p.flag? "perf" with
@@ -436,6 +440,21 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
           | none => return none
         return some out
 
+@[inline] def jsonGetNatOptionArray? (j : Json) : Option (Array (Option Nat)) :=
+  match jsonGetArr? j with
+  | none => none
+  | some arr =>
+      Id.run do
+        let mut out : Array (Option Nat) := Array.mkEmpty arr.size
+        for x in arr do
+          match x with
+          | .null => out := out.push none
+          | _ =>
+              match jsonGetNat? x with
+              | some v => out := out.push (some v)
+              | none => return none
+        return some out
+
 @[inline] def jsonGetStringArray? (j : Json) : Option (Array String) :=
   match jsonGetArr? j with
   | none => none
@@ -585,8 +604,37 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
         if !parent.isEmpty && declMap.contains parent then
           some parent
         else
-          let short := lastSegment parts
-          if declMap.contains short then some short else none
+        let short := lastSegment parts
+        if declMap.contains short then some short else none
+
+@[inline] def stackFrameList (stackIdx : Nat) (stackFrames : Array Nat)
+    (stackPrefix : Array (Option Nat)) : List Nat :=
+  Id.run do
+    let mut idx? : Option Nat := some stackIdx
+    let mut out : List Nat := []
+    let mut steps := 0
+    let maxSteps := stackFrames.size
+    while steps < maxSteps do
+      match idx? with
+      | none => break
+      | some idx =>
+          if idx >= stackFrames.size then
+            break
+          out := stackFrames[idx]! :: out
+          idx? := stackPrefix.getD idx none
+          steps := steps + 1
+    return out.reverse
+
+@[inline] def funcNameFromFrame? (frameIdx : Nat)
+    (frameFuncs : Array Nat) (funcNames : Array Nat)
+    (strings : Array String) : Option String :=
+  match arrayGet? frameFuncs frameIdx with
+  | none => none
+  | some funcIdx =>
+      match arrayGet? funcNames funcIdx with
+      | none => none
+      | some nameIdx =>
+          arrayGet? strings nameIdx
 
 structure ProfilerWeights where
   fileWeights : Std.HashMap System.FilePath Float := {}
@@ -617,6 +665,8 @@ structure ProfilerWeights where
                     | pure ()
                   let some stackFrames := jsonGetField? stackTableObj "frame" >>= jsonGetNatArray?
                     | pure ()
+                  let some stackPrefix := jsonGetField? stackTableObj "prefix" >>= jsonGetNatOptionArray?
+                    | pure ()
                   let some frameTableObj := jsonGetField? threadObj "frameTable" >>= jsonGetObj?
                     | pure ()
                   let some frameFuncs := jsonGetField? frameTableObj "func" >>= jsonGetNatArray?
@@ -631,42 +681,47 @@ structure ProfilerWeights where
                   for i in [0:n] do
                     match arrayGet? stacks i, arrayGet? weights i with
                     | some stackIdx, some weight =>
-                        match arrayGet? stackFrames stackIdx with
-                        | none => pure ()
-                        | some frameIdx =>
-                            match arrayGet? frameFuncs frameIdx with
-                            | none => pure ()
-                            | some funcIdx =>
-                                match arrayGet? funcNames funcIdx with
+                        let frames := stackFrameList stackIdx stackFrames stackPrefix
+                        let mut bestDecl : Option String := none
+                        let mut bestModule : Option String := none
+                        for frameIdx in frames do
+                          if bestDecl.isSome && bestModule.isSome then
+                            break
+                          match funcNameFromFrame? frameIdx frameFuncs funcNames strings with
+                          | none => pure ()
+                          | some funcName =>
+                              if bestModule.isNone then
+                                match moduleFromFuncName funcName with
+                                | some modName => bestModule := some modName
                                 | none => pure ()
-                                | some nameIdx =>
-                                    match arrayGet? strings nameIdx with
+                              if bestDecl.isNone then
+                                match declFullFromFuncName funcName with
+                                | some decl => bestDecl := some decl
+                                | none => pure ()
+                        match bestModule with
+                        | some modName =>
+                            match moduleMap.get? modName with
+                            | some path => outFiles := addWeight outFiles path weight
+                            | none =>
+                                match bestDecl with
+                                | some decl =>
+                                    match lookupDeclPath? declMap decl with
+                                    | some path => outFiles := addWeight outFiles path weight
                                     | none => pure ()
-                                    | some funcName =>
-                                        match moduleFromFuncName funcName with
-                                        | some modName =>
-                                            match moduleMap.get? modName with
-                                            | some path => outFiles := addWeight outFiles path weight
-                                            | none =>
-                                                match declFullFromFuncName funcName with
-                                                | some decl =>
-                                                    match lookupDeclPath? declMap decl with
-                                                    | some path => outFiles := addWeight outFiles path weight
-                                                    | none => pure ()
-                                                | none => pure ()
-                                        | none =>
-                                            match declFullFromFuncName funcName with
-                                            | some decl =>
-                                                match lookupDeclPath? declMap decl with
-                                                | some path => outFiles := addWeight outFiles path weight
-                                                | none => pure ()
-                                            | none => pure ()
-                                        match declFullFromFuncName funcName with
-                                        | some decl =>
-                                            match lookupDeclKey? declMap decl with
-                                            | some key => outDecls := addDeclWeight outDecls key weight
-                                            | none => pure ()
-                                        | none => pure ()
+                                | none => pure ()
+                        | none =>
+                            match bestDecl with
+                            | some decl =>
+                                match lookupDeclPath? declMap decl with
+                                | some path => outFiles := addWeight outFiles path weight
+                                | none => pure ()
+                            | none => pure ()
+                        match bestDecl with
+                        | some decl =>
+                            match lookupDeclKey? declMap decl with
+                            | some key => outDecls := addDeclWeight outDecls key weight
+                            | none => pure ()
+                        | none => pure ()
                     | _, _ => pure ()
             return { fileWeights := outFiles, declWeights := outDecls }
 
@@ -1054,6 +1109,10 @@ where
   let comps := relativeComponents root path
   String.intercalate "/" (rootLabel root :: comps)
 
+@[inline] def relativePath (root path : System.FilePath) : String :=
+  let comps := relativeComponents root path
+  String.intercalate "/" comps
+
 partial def collectFileNodes (node : NodeAcc) : List NodeAcc :=
   if node.isFile then
     [node]
@@ -1073,6 +1132,43 @@ partial def collectFileNodes (node : NodeAcc) : List NodeAcc :=
   match cfg.entriesOut? with
   | some path =>
       IO.FS.writeFile (System.FilePath.mk path) (toString <| entriesJsonFrom root rootAcc)
+  | none => pure ()
+
+@[inline] def spanJson (span : NodeSpan) : Json :=
+  Json.mkObj
+    [ ("line", Json.num (span.line : JsonNumber))
+    , ("col", Json.num (span.col : JsonNumber))
+    , ("end_line", Json.num (span.endLine : JsonNumber))
+    , ("end_col", Json.num (span.endCol : JsonNumber))
+    ]
+
+@[inline] def spanEntryJson (root : System.FilePath) (node : NodeAcc) : Json :=
+  Json.mkObj
+    [ ("id", Json.str node.id)
+    , ("name", Json.str node.name)
+    , ("kind", Json.str node.kind)
+    , ("path", Json.str (relativePath root node.path))
+    , ("span", spanJson node.span)
+    , ("metrics", metricsJsonFrom node.metrics)
+    ]
+
+@[inline] def spansJsonFrom (root : System.FilePath)
+    (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : Json :=
+  Id.run do
+    let mut spans : Array Json := #[]
+    for (_, nodes) in cmds.toList do
+      for n in nodes do
+        spans := spans.push (spanEntryJson root n)
+    return Json.mkObj
+      [ ("root", Json.str (root.toString))
+      , ("spans", Json.arr spans)
+      ]
+
+@[inline] def writeSpans (cfg : ObserveConfig) (root : System.FilePath)
+    (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : IO Unit := do
+  match cfg.spansOut? with
+  | some path =>
+      IO.FS.writeFile (System.FilePath.mk path) (toString <| spansJsonFrom root cmds)
   | none => pure ()
 
 partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : NodeAcc :=
@@ -1634,6 +1730,7 @@ def registerCollector (c : Collector) : IO Unit :=
     let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs ++ runtimeSpecs)
     writeReport cfg rootAcc specs generatedAt
     writeEntries cfg rootPath rootAcc
+    writeSpans cfg rootPath {}
     printProfileTop cfg {}
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
@@ -1669,6 +1766,7 @@ def registerCollector (c : Collector) : IO Unit :=
   rootAcc := attachCommandNodes rootAcc cmdMap
   writeReport cfg rootAcc specs generatedAt
   writeEntries cfg root rootAcc
+  writeSpans cfg root cmdMap
   printProfileTop cfg cmdMap
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
@@ -1715,6 +1813,7 @@ def registerCollector (c : Collector) : IO Unit :=
     "report-md" : String; "Write agent report Markdown to path (optional)"
     "report-top" : Nat; "Top N items per metric in report (default: 30)"
     "entries-out" : String; "Write entries schema JSON to path (optional)"
+    "spans-out" : String; "Write span map JSON to path (optional)"
     sample; "Emit sample metrics values"
     perf : String; "Import Linux perf script output (perf script > file.txt)"
     "perf-stat" : String; "Import Linux perf stat output (perf stat ... 2> file.txt)"
