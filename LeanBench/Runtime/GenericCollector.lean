@@ -391,7 +391,10 @@ def runtimeDataToMetricsByFile (data : RuntimeData) : MetricByFileF :=
   let memMetrics := finalizeMemoryMetrics (aggregateMemoryEvents data.memoryEvents)
   let gpuMemMetrics := finalizeMemoryMetrics (aggregateMemoryEvents data.gpuMemoryEvents)
   let ffiMetrics := aggregateFfiCalls data.ffiCalls
-  mergeMetricsByFile #[cpuMetrics, gpuMetrics, memMetrics, gpuMemMetrics, ffiMetrics]
+  let aggregatedByFile := data.aggregatedByFile.fold (fun acc pathStr metrics =>
+    acc.insert (System.FilePath.mk pathStr) metrics
+  ) {}
+  mergeMetricsByFile #[cpuMetrics, gpuMetrics, memMetrics, gpuMemMetrics, ffiMetrics, aggregatedByFile]
 
 /-- Convert RuntimeData to MetricByDeclF (float metrics by decl). -/
 def runtimeDataToMetricsByDecl (data : RuntimeData) : MetricByDeclF :=
@@ -400,7 +403,7 @@ def runtimeDataToMetricsByDecl (data : RuntimeData) : MetricByDeclF :=
   let memMetrics := finalizeMemoryMetricsByDecl (aggregateMemoryEventsByDecl data.memoryEvents)
   let gpuMemMetrics := finalizeMemoryMetricsByDecl (aggregateMemoryEventsByDecl data.gpuMemoryEvents)
   let ffiMetrics := aggregateFfiCallsByDecl data.ffiCalls
-  mergeMetricsByDecl #[cpuMetrics, gpuMetrics, memMetrics, gpuMemMetrics, ffiMetrics]
+  mergeMetricsByDecl #[cpuMetrics, gpuMetrics, memMetrics, gpuMemMetrics, ffiMetrics, data.aggregatedByDecl]
 
 /-- Load runtime JSON, validate, and convert to MetricByFile (Nat metrics). -/
 def collectFromRuntimeJson (path : System.FilePath) : IO MetricByFile := do
