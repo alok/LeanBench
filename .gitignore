@@ -17,3 +17,6 @@
 /radar/state/
 /radar/cache/
 /visualizer/node_modules/
+/visualizer/vscode/node_modules/
+/visualizer/vscode/out/
+/visualizer/vscode/.vscode-test/

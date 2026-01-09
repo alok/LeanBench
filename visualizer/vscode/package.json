@@ -1,0 +1,98 @@
+{
+  "name": "lean-observatory",
+  "displayName": "Lean Observatory",
+  "description": "Heatmap Lean spans by blended metric weights.",
+  "version": "0.1.0",
+  "publisher": "lean-observatory",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:leanObservatory.loadSpans",
+    "onCommand:leanObservatory.reload",
+    "onCommand:leanObservatory.clear",
+    "onStartupFinished",
+    "onLanguage:lean"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "leanObservatory.loadSpans",
+        "title": "Lean Observatory: Load Spans JSON"
+      },
+      {
+        "command": "leanObservatory.reload",
+        "title": "Lean Observatory: Reload Spans"
+      },
+      {
+        "command": "leanObservatory.clear",
+        "title": "Lean Observatory: Clear Heatmap"
+      }
+    ],
+    "configuration": {
+      "title": "Lean Observatory",
+      "properties": {
+        "leanObservatory.spansJsonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to spans.json produced by LeanObserve (--spans-out). If relative, it is resolved from the first workspace root."
+        },
+        "leanObservatory.weights": {
+          "type": "object",
+          "default": {},
+          "description": "Metric weights for linear blending. Keys are metric ids from spans.json (e.g. profile_weight, if_points, heap_allocs_heuristic)."
+        },
+        "leanObservatory.normalize": {
+          "type": "string",
+          "enum": [
+            "max",
+            "minmax"
+          ],
+          "default": "max",
+          "description": "Metric normalization for each term before blending."
+        },
+        "leanObservatory.includeKinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "decl",
+            "command"
+          ],
+          "description": "Which span kinds to include when decorating."
+        },
+        "leanObservatory.minScore": {
+          "type": "number",
+          "default": 0,
+          "description": "Minimum normalized score (0..1) to show."
+        },
+        "leanObservatory.maxDecorationsPerFile": {
+          "type": "number",
+          "default": 2000,
+          "description": "Cap decorations per file for performance."
+        },
+        "leanObservatory.showHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show metric details on hover."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . -w"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "tslib": "^2.6.2",
+    "typescript": "^5.4.5"
+  }
+}
