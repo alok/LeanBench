@@ -241,12 +241,19 @@ function updateMetricSelectors() {
     if (state.data && Array.isArray(state.data.metrics)) {
         specs = state.data.metrics.filter((m) => m && m.key);
     }
-    if (specs.length === 0 && state.data && state.data.root) {
+    if (state.data && state.data.root) {
         const metrics = new Set();
         collectMetrics(state.data.root, metrics);
-        specs = Array.from(metrics)
-            .sort()
-            .map((k) => ({ key: k, label: k }));
+        if (specs.length === 0) {
+            specs = Array.from(metrics)
+                .sort()
+                .map((k) => ({ key: k, label: k }));
+        }
+        else {
+            const known = new Set(specs.map((s) => s.key));
+            const extras = Array.from(metrics).filter((k) => !known.has(k)).sort();
+            extras.forEach((k) => specs.push({ key: k, label: k, group: "other" }));
+        }
     }
     state.metricSpecs = specs;
     // Group specs by category (applies filter)
