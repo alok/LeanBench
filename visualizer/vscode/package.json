@@ -15,6 +15,9 @@
     "onCommand:leanObservatory.loadSpans",
     "onCommand:leanObservatory.reload",
     "onCommand:leanObservatory.clear",
+    "onCommand:leanObservatory.editWeights",
+    "onCommand:leanObservatory.showLegend",
+    "onCommand:leanObservatory.cyclePalette",
     "onStartupFinished",
     "onLanguage:lean"
   ],
@@ -32,6 +35,18 @@
       {
         "command": "leanObservatory.clear",
         "title": "Lean Observatory: Clear Heatmap"
+      },
+      {
+        "command": "leanObservatory.editWeights",
+        "title": "Lean Observatory: Edit Weights"
+      },
+      {
+        "command": "leanObservatory.showLegend",
+        "title": "Lean Observatory: Show Legend"
+      },
+      {
+        "command": "leanObservatory.cyclePalette",
+        "title": "Lean Observatory: Cycle Palette"
       }
     ],
     "configuration": {
@@ -41,6 +56,11 @@
           "type": "string",
           "default": "",
           "description": "Path to spans.json produced by LeanObserve (--spans-out). If relative, it is resolved from the first workspace root."
+        },
+        "leanObservatory.metricsJsonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to metrics.json produced by LeanObserve (--out). If empty, tries to use metrics.json in the same folder as spansJsonPath."
         },
         "leanObservatory.weights": {
           "type": "object",
@@ -71,6 +91,21 @@
           "type": "number",
           "default": 0,
           "description": "Minimum normalized score (0..1) to show."
+        },
+        "leanObservatory.palette": {
+          "type": "string",
+          "enum": [
+            "heat",
+            "blueOrange",
+            "viridis"
+          ],
+          "default": "heat",
+          "description": "Color palette for heatmap rendering."
+        },
+        "leanObservatory.showLegend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show palette status bar item and legend panel command."
         },
         "leanObservatory.maxDecorationsPerFile": {
           "type": "number",
