@@ -73,7 +73,7 @@ structure GpuKernel where
 
 /-- Memory event (CPU or GPU allocation). -/
 structure MemoryEvent where
-  type : String  -- "alloc" | "free" | "realloc" | "transfer_h2d" | "transfer_d2h" | "transfer_d2d"
+  type : String  -- "alloc" | "free" | "realloc" | "gc" | "transfer_h2d" | "transfer_d2h" | "transfer_d2d"
   bytes : Nat
   timestampNs : Option Float := none
   symbol : Option String := none

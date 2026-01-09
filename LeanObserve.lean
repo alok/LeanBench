@@ -1464,6 +1464,8 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
     { key := "free_bytes", label := "Freed Bytes", kind := "bytes", unit := "bytes", group := "memory" },
     { key := "live_alloc_bytes", label := "Live Alloc Bytes", kind := "bytes", unit := "bytes", group := "memory",
       defaultBlendWeight := 30 },
+    { key := "gc_count", label := "GC Runs", kind := "count", unit := "runs", group := "memory" },
+    { key := "gc_bytes", label := "GC Bytes", kind := "bytes", unit := "bytes", group := "memory" },
     { key := "peak_memory_bytes", label := "Peak Memory", kind := "bytes", unit := "bytes", group := "memory" },
     { key := "live_allocs", label := "Live Allocations", kind := "count", unit := "allocs", group := "memory" }
   ]

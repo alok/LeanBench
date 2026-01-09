@@ -131,7 +131,7 @@ def validateMemoryEvent (event : MemoryEvent) : ValidationResult MemoryEvent := 
   let e := event
 
   -- Type should be valid
-  let validTypes := #["alloc", "free", "realloc", "transfer_h2d", "transfer_d2h", "transfer_d2d"]
+  let validTypes := #["alloc", "free", "realloc", "gc", "transfer_h2d", "transfer_d2h", "transfer_d2d"]
   if !validTypes.contains event.type then
     warnings := warnings.push {
       category := "range"

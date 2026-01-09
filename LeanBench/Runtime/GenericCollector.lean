@@ -256,6 +256,11 @@ def aggregateMemoryEvents (events : Array MemoryEvent) : MetricByFileF := Id.run
         let prevBytes := fileMetrics.getD "free_bytes" 0.0
         fileMetrics := fileMetrics.insert "free_count" (prev + 1.0)
         fileMetrics := fileMetrics.insert "free_bytes" (prevBytes + event.bytes.toFloat)
+      | "gc" =>
+        let prev := fileMetrics.getD "gc_count" 0.0
+        let prevBytes := fileMetrics.getD "gc_bytes" 0.0
+        fileMetrics := fileMetrics.insert "gc_count" (prev + 1.0)
+        fileMetrics := fileMetrics.insert "gc_bytes" (prevBytes + event.bytes.toFloat)
       | _ => pure ()
 
       result := result.insert path fileMetrics
@@ -278,6 +283,11 @@ def aggregateMemoryEventsByDecl (events : Array MemoryEvent) : MetricByDeclF := 
         let prevBytes := declMetrics.getD "free_bytes" 0.0
         declMetrics := declMetrics.insert "free_count" (prev + 1.0)
         declMetrics := declMetrics.insert "free_bytes" (prevBytes + event.bytes.toFloat)
+      | "gc" =>
+        let prev := declMetrics.getD "gc_count" 0.0
+        let prevBytes := declMetrics.getD "gc_bytes" 0.0
+        declMetrics := declMetrics.insert "gc_count" (prev + 1.0)
+        declMetrics := declMetrics.insert "gc_bytes" (prevBytes + event.bytes.toFloat)
       | _ => pure ()
       result := result.insert decl declMetrics
   return result
