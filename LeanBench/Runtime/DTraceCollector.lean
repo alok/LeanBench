@@ -165,11 +165,19 @@ def dtraceToRuntimeData (content : String) : RuntimeData := Id.run do
     cpuSamples := cpuSamples
   }
 
-/-- Load DTrace output and convert to MetricByFile. -/
-def collectFromDTrace (path : System.FilePath) : IO MetricByFile := do
+/-- Load DTrace output and convert to MetricByFile and MetricByDecl. -/
+def collectFromDTraceWithDecls (path : System.FilePath) : IO (MetricByFile × MetricByDecl) := do
   let content ← IO.FS.readFile path
   let data := dtraceToRuntimeData content
-  let floatMetrics := runtimeDataToMetricsByFile data
-  return mergeMetricByFileF {} floatMetrics
+  let floatByFile := runtimeDataToMetricsByFile data
+  let floatByDecl := runtimeDataToMetricsByDecl data
+  let byFile := mergeMetricByFileF {} floatByFile
+  let byDecl := mergeMetricByDeclF {} floatByDecl
+  return (byFile, byDecl)
+
+/-- Load DTrace output and convert to MetricByFile. -/
+def collectFromDTrace (path : System.FilePath) : IO MetricByFile := do
+  let (byFile, _) ← collectFromDTraceWithDecls path
+  return byFile
 
 end LeanBench.Runtime

@@ -119,12 +119,21 @@ def instrumentsToRuntimeData (content : String) (isGpuTrace : Bool := false) : R
       cpuSamples := aggregated
     }
 
-/-- Load Instruments trace and convert to MetricByFile. -/
-def collectFromInstruments (path : System.FilePath) (isGpuTrace : Bool := false) : IO MetricByFile := do
+/-- Load Instruments trace and convert to MetricByFile and MetricByDecl. -/
+def collectFromInstrumentsWithDecls (path : System.FilePath)
+    (isGpuTrace : Bool := false) : IO (MetricByFile × MetricByDecl) := do
   let content ← IO.FS.readFile path
   let data := instrumentsToRuntimeData content isGpuTrace
-  let floatMetrics := runtimeDataToMetricsByFile data
-  return mergeMetricByFileF {} floatMetrics
+  let floatByFile := runtimeDataToMetricsByFile data
+  let floatByDecl := runtimeDataToMetricsByDecl data
+  let byFile := mergeMetricByFileF {} floatByFile
+  let byDecl := mergeMetricByDeclF {} floatByDecl
+  return (byFile, byDecl)
+
+/-- Load Instruments trace and convert to MetricByFile. -/
+def collectFromInstruments (path : System.FilePath) (isGpuTrace : Bool := false) : IO MetricByFile := do
+  let (byFile, _) ← collectFromInstrumentsWithDecls path isGpuTrace
+  return byFile
 
 /-- Run xctrace export on a .trace file and return parsed data. -/
 def exportAndParseTrace (tracePath : System.FilePath) : IO RuntimeData := do

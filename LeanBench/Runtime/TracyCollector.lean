@@ -217,11 +217,19 @@ def tracyToRuntimeData (content : String) : RuntimeData := Id.run do
     frames := frames
   }
 
-/-- Load Tracy CSV and convert to MetricByFile. -/
-def collectFromTracy (path : System.FilePath) : IO MetricByFile := do
+/-- Load Tracy CSV and convert to MetricByFile and MetricByDecl. -/
+def collectFromTracyWithDecls (path : System.FilePath) : IO (MetricByFile × MetricByDecl) := do
   let content ← IO.FS.readFile path
   let data := tracyToRuntimeData content
-  let floatMetrics := runtimeDataToMetricsByFile data
-  return mergeMetricByFileF {} floatMetrics
+  let floatByFile := runtimeDataToMetricsByFile data
+  let floatByDecl := runtimeDataToMetricsByDecl data
+  let byFile := mergeMetricByFileF {} floatByFile
+  let byDecl := mergeMetricByDeclF {} floatByDecl
+  return (byFile, byDecl)
+
+/-- Load Tracy CSV and convert to MetricByFile. -/
+def collectFromTracy (path : System.FilePath) : IO MetricByFile := do
+  let (byFile, _) ← collectFromTracyWithDecls path
+  return byFile
 
 end LeanBench.Runtime

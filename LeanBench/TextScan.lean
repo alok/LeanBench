@@ -6,6 +6,7 @@ import Lean
 abbrev MetricKey := String
 abbrev MetricMap := Std.HashMap MetricKey Nat
 abbrev MetricByFile := Std.HashMap System.FilePath MetricMap
+abbrev MetricByDecl := Std.HashMap String MetricMap
 
 @[inline] def isPrefixChars (pre s : List Char) : Bool :=
   match pre, s with
@@ -371,6 +372,9 @@ abbrev MetricMapF := Std.HashMap MetricKey Float
 /-- Float metrics by file. -/
 abbrev MetricByFileF := Std.HashMap System.FilePath MetricMapF
 
+/-- Float metrics by declaration name. -/
+abbrev MetricByDeclF := Std.HashMap String MetricMapF
+
 /-- Convert a float ratio (0.0 to 1.0) to basis points (0 to 10000). -/
 @[inline] def ratioToBp (ratio : Float) : Nat :=
   (ratio * 10000.0).toUInt64.toNat
@@ -413,6 +417,13 @@ abbrev MetricByFileF := Std.HashMap System.FilePath MetricMapF
   floats.fold (fun acc path fmap =>
     let existing := acc.getD path {}
     acc.insert path (mergeMetricMapF existing fmap)
+  ) base
+
+/-- Merge float metrics by declaration into Nat metrics by declaration. -/
+@[inline] def mergeMetricByDeclF (base : MetricByDecl) (floats : MetricByDeclF) : MetricByDecl :=
+  floats.fold (fun acc decl fmap =>
+    let existing := acc.getD decl {}
+    acc.insert decl (mergeMetricMapF existing fmap)
   ) base
 
 /-- Empty float metric map. -/

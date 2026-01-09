@@ -290,8 +290,8 @@ def perfToRuntimeData (scriptContent : Option String) (statContent : Option Stri
   }
 
 /-- Load perf data from file(s) and convert to MetricByFile. -/
-def collectFromPerf (scriptPath : Option System.FilePath)
-    (statPath : Option System.FilePath := none) : IO MetricByFile := do
+def collectFromPerfWithDecls (scriptPath : Option System.FilePath)
+    (statPath : Option System.FilePath := none) : IO (MetricByFile × MetricByDecl) := do
   let scriptContent ← match scriptPath with
     | some p => some <$> IO.FS.readFile p
     | none => pure none
@@ -299,7 +299,16 @@ def collectFromPerf (scriptPath : Option System.FilePath)
     | some p => some <$> IO.FS.readFile p
     | none => pure none
   let data := perfToRuntimeData scriptContent statContent
-  let floatMetrics := runtimeDataToMetricsByFile data
-  return mergeMetricByFileF {} floatMetrics
+  let floatByFile := runtimeDataToMetricsByFile data
+  let floatByDecl := runtimeDataToMetricsByDecl data
+  let byFile := mergeMetricByFileF {} floatByFile
+  let byDecl := mergeMetricByDeclF {} floatByDecl
+  return (byFile, byDecl)
+
+/-- Load perf data from file(s) and convert to MetricByFile. -/
+def collectFromPerf (scriptPath : Option System.FilePath)
+    (statPath : Option System.FilePath := none) : IO MetricByFile := do
+  let (byFile, _) ← collectFromPerfWithDecls scriptPath statPath
+  return byFile
 
 end LeanBench.Runtime

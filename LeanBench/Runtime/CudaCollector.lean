@@ -234,8 +234,9 @@ def nsightToRuntimeData (kernelJson : Option Json) (apiJson : Option Json) : Run
     gpuMemoryEvents := memEvents
   }
 
-/-- Load NSight kernel JSON and convert to MetricByFile. -/
-def collectFromNsight (kernelPath : Option System.FilePath) (apiPath : Option System.FilePath := none) : IO MetricByFile := do
+/-- Load NSight kernel JSON and convert to MetricByFile and MetricByDecl. -/
+def collectFromNsightWithDecls (kernelPath : Option System.FilePath)
+    (apiPath : Option System.FilePath := none) : IO (MetricByFile × MetricByDecl) := do
   let kernelJson ← match kernelPath with
     | some path =>
       let content ← IO.FS.readFile path
@@ -253,7 +254,16 @@ def collectFromNsight (kernelPath : Option System.FilePath) (apiPath : Option Sy
     | none => pure none
 
   let data := nsightToRuntimeData kernelJson apiJson
-  let floatMetrics := runtimeDataToMetricsByFile data
-  return mergeMetricByFileF {} floatMetrics
+  let floatByFile := runtimeDataToMetricsByFile data
+  let floatByDecl := runtimeDataToMetricsByDecl data
+  let byFile := mergeMetricByFileF {} floatByFile
+  let byDecl := mergeMetricByDeclF {} floatByDecl
+  return (byFile, byDecl)
+
+/-- Load NSight kernel JSON and convert to MetricByFile. -/
+def collectFromNsight (kernelPath : Option System.FilePath)
+    (apiPath : Option System.FilePath := none) : IO MetricByFile := do
+  let (byFile, _) ← collectFromNsightWithDecls kernelPath apiPath
+  return byFile
 
 end LeanBench.Runtime

@@ -171,12 +171,20 @@ def metalTraceToRuntimeData (content : String) : RuntimeData := Id.run do
     gpuMemoryEvents := memEvents
   }
 
-/-- Load Metal trace and convert to MetricByFile. -/
-def collectFromMetal (path : System.FilePath) : IO MetricByFile := do
+/-- Load Metal trace and convert to MetricByFile and MetricByDecl. -/
+def collectFromMetalWithDecls (path : System.FilePath) : IO (MetricByFile × MetricByDecl) := do
   let content ← IO.FS.readFile path
   let data := metalTraceToRuntimeData content
-  let floatMetrics := runtimeDataToMetricsByFile data
-  return mergeMetricByFileF {} floatMetrics
+  let floatByFile := runtimeDataToMetricsByFile data
+  let floatByDecl := runtimeDataToMetricsByDecl data
+  let byFile := mergeMetricByFileF {} floatByFile
+  let byDecl := mergeMetricByDeclF {} floatByDecl
+  return (byFile, byDecl)
+
+/-- Load Metal trace and convert to MetricByFile. -/
+def collectFromMetal (path : System.FilePath) : IO MetricByFile := do
+  let (byFile, _) ← collectFromMetalWithDecls path
+  return byFile
 
 /-- Parse vendor-neutral GPU JSON (for any GPU vendor). -/
 def parseGenericGpuJson (json : Json) : Except String RuntimeData := do

@@ -202,6 +202,11 @@ structure Collector where
     let prev := acc.getD path emptyMetricMap
     acc.insert path (mergeMetricMap prev metrics))
 
+@[inline] def mergeByDecl (a b : MetricByDecl) : MetricByDecl :=
+  b.fold (init := a) (fun acc decl metrics =>
+    let prev := acc.getD decl emptyMetricMap
+    acc.insert decl (mergeMetricMap prev metrics))
+
 @[inline] def readFileMetricMap (path : System.FilePath) (buildTimeMs : Nat) : IO MetricMap := do
   let content ← IO.FS.readFile path
   let lines := content.splitOn "\n"
@@ -609,6 +614,41 @@ partial def findCommandStx? (t : InfoTree) : Option Syntax :=
         let short := lastSegment parts
         if declMap.contains short then some short else none
 
+@[inline] def lookupDeclMetric? (declMetrics : MetricByDecl) (name : String) :
+    Option MetricMap :=
+  match declMetrics.get? name with
+  | some m => some m
+  | none =>
+      let parts := name.splitOn "."
+      match parts.reverse with
+      | [] => none
+      | _ :: rest =>
+          let parent := String.intercalate "." rest.reverse
+          if !parent.isEmpty && declMetrics.contains parent then
+            declMetrics.get? parent
+          else
+            let short := lastSegment parts
+            declMetrics.get? short
+
+@[inline] def applyDeclMetrics (cmds : Std.HashMap System.FilePath (Array NodeAcc))
+    (declMetrics : MetricByDecl) : Std.HashMap System.FilePath (Array NodeAcc) :=
+  Id.run do
+    let mut updated : Std.HashMap System.FilePath (Array NodeAcc) := {}
+    for (path, nodes) in cmds.toList do
+      let mut newNodes := nodes
+      for idx in [0:nodes.size] do
+        let n := nodes[idx]!
+        if n.kind != "decl" || n.name.isEmpty then
+          pure ()
+        else
+          match lookupDeclMetric? declMetrics n.name with
+          | some m =>
+              let merged := mergeMetricMap n.metrics m
+              newNodes := newNodes.set! idx { n with metrics := merged }
+          | none => pure ()
+      updated := updated.insert path newNodes
+    return updated
+
 @[inline] def stackFrameList (stackIdx : Nat) (stackFrames : Array Nat)
     (stackPrefix : Array (Option Nat)) : List Nat :=
   Id.run do
@@ -683,46 +723,48 @@ structure ProfilerWeights where
                   for i in [0:n] do
                     match arrayGet? stacks i, arrayGet? weights i with
                     | some stackIdx, some weight =>
-                        let frames := stackFrameList stackIdx stackFrames stackPrefix
-                        let mut bestDecl : Option String := none
-                        let mut bestModule : Option String := none
+                        let frames := (stackFrameList stackIdx stackFrames stackPrefix).reverse
+                        let mut declKey : Option String := none
+                        let mut declPath : Option System.FilePath := none
+                        let mut modulePath : Option System.FilePath := none
                         for frameIdx in frames do
-                          if bestDecl.isSome && bestModule.isSome then
+                          if declKey.isSome && modulePath.isSome then
                             break
                           match funcNameFromFrame? frameIdx frameFuncs funcNames strings with
                           | none => pure ()
                           | some funcName =>
-                              if bestModule.isNone then
-                                match moduleFromFuncName funcName with
-                                | some modName => bestModule := some modName
-                                | none => pure ()
-                              if bestDecl.isNone then
+                              if declKey.isNone then
                                 match declFullFromFuncName funcName with
-                                | some decl => bestDecl := some decl
-                                | none => pure ()
-                        match bestModule with
-                        | some modName =>
-                            match moduleMap.get? modName with
-                            | some path => outFiles := addWeight outFiles path weight
-                            | none =>
-                                match bestDecl with
                                 | some decl =>
-                                    match lookupDeclPath? declMap decl with
-                                    | some path => outFiles := addWeight outFiles path weight
+                                    match lookupDeclKey? declMap decl with
+                                    | some key =>
+                                        declKey := some key
+                                        declPath := declMap.get? key
                                     | none => pure ()
                                 | none => pure ()
-                        | none =>
-                            match bestDecl with
-                            | some decl =>
-                                match lookupDeclPath? declMap decl with
-                                | some path => outFiles := addWeight outFiles path weight
+                              if declKey.isNone then
+                                match declFromFuncName funcName with
+                                | some decl =>
+                                    match lookupDeclKey? declMap decl with
+                                    | some key =>
+                                        declKey := some key
+                                        declPath := declMap.get? key
+                                    | none => pure ()
                                 | none => pure ()
-                            | none => pure ()
-                        match bestDecl with
-                        | some decl =>
-                            match lookupDeclKey? declMap decl with
-                            | some key => outDecls := addDeclWeight outDecls key weight
-                            | none => pure ()
+                              if modulePath.isNone then
+                                match moduleFromFuncName funcName with
+                                | some modName =>
+                                    modulePath := moduleMap.get? modName
+                                | none => pure ()
+                        let filePath := match declPath, modulePath with
+                          | some p, _ => some p
+                          | none, some p => some p
+                          | none, none => none
+                        match filePath with
+                        | some path => outFiles := addWeight outFiles path weight
+                        | none => pure ()
+                        match declKey with
+                        | some key => outDecls := addDeclWeight outDecls key weight
                         | none => pure ()
                     | _, _ => pure ()
             return { fileWeights := outFiles, declWeights := outDecls }
@@ -836,6 +878,7 @@ partial def insertNode (node : NodeAcc) (basePath : System.FilePath) (components
       let pathStr := filePath.toString
       { node with
         isFile := true
+        kind := "file"
         path := filePath
         id := pathStr
         span := { file := pathStr, line := 1, col := 1, endLine := 1, endCol := 1 }
@@ -1154,23 +1197,23 @@ partial def collectFileNodes (node : NodeAcc) : List NodeAcc :=
     , ("metrics", metricsJsonFrom node.metrics)
     ]
 
-@[inline] def spansJsonFrom (root : System.FilePath)
-    (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : Json :=
-  Id.run do
-    let mut spans : Array Json := #[]
-    for (_, nodes) in cmds.toList do
-      for n in nodes do
-        spans := spans.push (spanEntryJson root n)
-    return Json.mkObj
-      [ ("root", Json.str (root.toString))
-      , ("spans", Json.arr spans)
-      ]
+partial def collectAllNodes (node : NodeAcc) : List NodeAcc :=
+  let children := node.children.foldl (fun acc child => acc ++ collectAllNodes child) []
+  node :: children
+
+@[inline] def spansJsonFrom (root : System.FilePath) (rootAcc : NodeAcc) : Json :=
+  let nodes := collectAllNodes rootAcc
+  let spans := nodes.toArray.map (spanEntryJson root)
+  Json.mkObj
+    [ ("root", Json.str (root.toString))
+    , ("spans", Json.arr spans)
+    ]
 
 @[inline] def writeSpans (cfg : ObserveConfig) (root : System.FilePath)
-    (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : IO Unit := do
+    (rootAcc : NodeAcc) : IO Unit := do
   match cfg.spansOut? with
   | some path =>
-      IO.FS.writeFile (System.FilePath.mk path) (toString <| spansJsonFrom root cmds)
+      IO.FS.writeFile (System.FilePath.mk path) (toString <| spansJsonFrom root rootAcc)
   | none => pure ()
 
 partial def attachCommandNodes (node : NodeAcc) (cmds : Std.HashMap System.FilePath (Array NodeAcc)) : NodeAcc :=
@@ -1418,6 +1461,9 @@ partial def countInfoTree (t : InfoTree) (acc : InfoTreeAcc) : InfoTreeAcc :=
     { key := "free_count", label := "Frees", kind := "count", unit := "frees", group := "memory" },
     { key := "alloc_bytes", label := "Allocated Bytes", kind := "bytes", unit := "bytes", group := "memory",
       defaultBlendWeight := 50 },
+    { key := "free_bytes", label := "Freed Bytes", kind := "bytes", unit := "bytes", group := "memory" },
+    { key := "live_alloc_bytes", label := "Live Alloc Bytes", kind := "bytes", unit := "bytes", group := "memory",
+      defaultBlendWeight := 30 },
     { key := "peak_memory_bytes", label := "Peak Memory", kind := "bytes", unit := "bytes", group := "memory" },
     { key := "live_allocs", label := "Live Allocations", kind := "count", unit := "allocs", group := "memory" }
   ]
@@ -1604,45 +1650,58 @@ initialize searchPathInitRef : IO.Ref Bool ← IO.mkRef false
 /-- Runtime collector - imports CPU/GPU/memory metrics from external profiler data. -/
 @[inline] def collectRuntime (ctx : CollectContext) : IO MetricByFile := do
   let mut acc : MetricByFile := {}
+  let mut declAcc : MetricByDecl := {}
 
   -- Import Linux perf data
   if ctx.cfg.perfScript?.isSome || ctx.cfg.perfStat?.isSome then
     let scriptPath := ctx.cfg.perfScript?.map System.FilePath.mk
     let statPath := ctx.cfg.perfStat?.map System.FilePath.mk
-    let perf ← LeanBench.Runtime.collectFromPerf scriptPath statPath
+    let (perf, decls) ← LeanBench.Runtime.collectFromPerfWithDecls scriptPath statPath
     acc := mergeByFile acc perf
+    declAcc := mergeByDecl declAcc decls
 
   -- Import macOS Instruments trace
   if let some path := ctx.cfg.instrumentsTrace? then
-    let inst ← LeanBench.Runtime.collectFromInstruments ⟨path⟩
+    let (inst, decls) ← LeanBench.Runtime.collectFromInstrumentsWithDecls ⟨path⟩
     acc := mergeByFile acc inst
+    declAcc := mergeByDecl declAcc decls
 
   -- Import Metal GPU trace
   if let some path := ctx.cfg.metalTrace? then
-    let metal ← LeanBench.Runtime.collectFromMetal ⟨path⟩
+    let (metal, decls) ← LeanBench.Runtime.collectFromMetalWithDecls ⟨path⟩
     acc := mergeByFile acc metal
+    declAcc := mergeByDecl declAcc decls
 
   -- Import vendor-neutral GPU JSON
   if let some path := ctx.cfg.gpuJson? then
-    let gpu ← LeanBench.Runtime.collectFromRuntimeJson ⟨path⟩
+    let (gpu, decls) ← LeanBench.Runtime.collectFromRuntimeJsonWithDecls ⟨path⟩
     acc := mergeByFile acc gpu
+    declAcc := mergeByDecl declAcc decls
 
   -- Import CUDA/NSight data
   if ctx.cfg.cudaKernels?.isSome || ctx.cfg.cudaApi?.isSome then
     let kernelPath := ctx.cfg.cudaKernels?.map System.FilePath.mk
     let apiPath := ctx.cfg.cudaApi?.map System.FilePath.mk
-    let cuda ← LeanBench.Runtime.collectFromNsight kernelPath apiPath
+    let (cuda, decls) ← LeanBench.Runtime.collectFromNsightWithDecls kernelPath apiPath
     acc := mergeByFile acc cuda
+    declAcc := mergeByDecl declAcc decls
 
   -- Import Tracy profiler data
   if let some path := ctx.cfg.tracyTrace? then
-    let tracy ← LeanBench.Runtime.collectFromTracy ⟨path⟩
+    let (tracy, decls) ← LeanBench.Runtime.collectFromTracyWithDecls ⟨path⟩
     acc := mergeByFile acc tracy
+    declAcc := mergeByDecl declAcc decls
 
   -- Import macOS DTrace data
   if let some path := ctx.cfg.dtraceOutput? then
-    let dtrace ← LeanBench.Runtime.collectFromDTrace ⟨path⟩
+    let (dtrace, decls) ← LeanBench.Runtime.collectFromDTraceWithDecls ⟨path⟩
     acc := mergeByFile acc dtrace
+    declAcc := mergeByDecl declAcc decls
+
+  if !declAcc.isEmpty then
+    let cmdMap ← ctx.commandNodesRef.get
+    if !cmdMap.isEmpty then
+      ctx.commandNodesRef.set (applyDeclMetrics cmdMap declAcc)
 
   return acc
 
@@ -1732,7 +1791,7 @@ def registerCollector (c : Collector) : IO Unit :=
     let specs := dedupSpecs (textScanSpecs ++ infoTreeSpecs ++ profileSpecs ++ runtimeSpecs)
     writeReport cfg rootAcc specs generatedAt
     writeEntries cfg rootPath rootAcc
-    writeSpans cfg rootPath {}
+    writeSpans cfg rootPath rootAcc
     printProfileTop cfg {}
     return Json.mkObj
       [ ("schema_version", Json.str cfg.schemaVersion)
@@ -1768,7 +1827,7 @@ def registerCollector (c : Collector) : IO Unit :=
   rootAcc := attachCommandNodes rootAcc cmdMap
   writeReport cfg rootAcc specs generatedAt
   writeEntries cfg root rootAcc
-  writeSpans cfg root cmdMap
+  writeSpans cfg root rootAcc
   printProfileTop cfg cmdMap
   return Json.mkObj
     [ ("schema_version", Json.str cfg.schemaVersion)
