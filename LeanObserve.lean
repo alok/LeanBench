@@ -114,6 +114,12 @@ structure ObserveConfig where
     | none => pure ()
     if cfg.spansOut?.isSome then
       cfg := { cfg with commandNodes := true, infoTree := true }
+    let hasRuntime :=
+      cfg.perfScript?.isSome || cfg.perfStat?.isSome || cfg.instrumentsTrace?.isSome ||
+      cfg.metalTrace?.isSome || cfg.gpuJson?.isSome || cfg.cudaKernels?.isSome ||
+      cfg.cudaApi?.isSome || cfg.tracyTrace?.isSome || cfg.dtraceOutput?.isSome
+    if hasRuntime && !cfg.commandNodes then
+      cfg := { cfg with commandNodes := true, infoTree := true }
     return cfg
 
 structure NodeSpan where
