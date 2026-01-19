@@ -84,7 +84,7 @@
       <!-- Allocs View (Memory waterfall) -->
       <section class="canvas view-container" id="allocsView" hidden>
         <div class="allocs-header">
-          <h3>Memory Allocations</h3>
+          <h3 id="allocsTitle">Memory Allocations</h3>
           <div class="allocs-controls">
             <label class="control">
               <span>Group By</span>
@@ -116,6 +116,10 @@
         <div class="inspector-card">
           <div class="inspector-title">Details</div>
           <div id="detailBody" class="detail-body">Hover a tile to inspect metrics.</div>
+        </div>
+        <div class="inspector-card" id="systemCard" hidden>
+          <div class="inspector-title">System</div>
+          <div id="systemInfo" class="system-info"></div>
         </div>
       </aside>
     </main>

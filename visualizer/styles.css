@@ -319,6 +319,46 @@ body {
   word-break: break-all;
 }
 
+.system-info {
+  display: grid;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.system-section {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(29, 39, 51, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.system-heading {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.system-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.system-row span:last-child {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.system-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .detail-metrics {
   display: grid;
   gap: 6px;
@@ -429,6 +469,13 @@ body {
 
 .alloc-event.free {
   fill: #ef5350;
+}
+
+.alloc-event.realloc,
+.alloc-event.transfer_h2d,
+.alloc-event.transfer_d2h,
+.alloc-event.transfer_d2d {
+  fill: #ffd166;
 }
 
 /* Optgroup styling for metric selectors */

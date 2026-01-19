@@ -23,6 +23,8 @@ const blendPanel = document.getElementById("blendPanel");
 const blendList = document.getElementById("blendList");
 const topList = document.getElementById("topList");
 const detailBody = document.getElementById("detailBody");
+const systemCard = document.getElementById("systemCard");
+const systemInfo = document.getElementById("systemInfo");
 // View switching elements
 const viewTabs = document.querySelectorAll(".view-tab");
 const treemapView = document.getElementById("treemapView");
@@ -30,6 +32,7 @@ const timelineView = document.getElementById("timelineView");
 const allocsView = document.getElementById("allocsView");
 const timelineEl = document.getElementById("timeline");
 const allocsEl = document.getElementById("allocs");
+const allocsTitle = document.getElementById("allocsTitle");
 const timelineColorBy = document.getElementById("timelineColorBy");
 const allocsGroupBy = document.getElementById("allocsGroupBy");
 const BLEND_KEY = "__blend__";
@@ -115,6 +118,18 @@ function formatValue(value, kind) {
     if (Math.abs(value) >= 1000)
         return value.toLocaleString();
     return Number.isInteger(value) ? value.toString() : value.toFixed(3);
+}
+function formatFrequencyMhz(value) {
+    if (value == null || !Number.isFinite(value))
+        return "n/a";
+    if (value >= 1000)
+        return `${(value / 1000).toFixed(2)} GHz`;
+    return `${value.toFixed(0)} MHz`;
+}
+function formatBandwidthGbps(value) {
+    if (value == null || !Number.isFinite(value))
+        return "n/a";
+    return `${value.toFixed(1)} GB/s`;
 }
 /** Get the kind of a metric by key. */
 function getMetricKind(key) {
@@ -409,6 +424,77 @@ function renderDetails(node) {
     detailBody.appendChild(path);
     detailBody.appendChild(list);
 }
+function renderSystemSection(title, rows) {
+    const entries = rows
+        .map(([label, value]) => `<div class="system-row"><span>${label}</span><span>${value}</span></div>`)
+        .join("");
+    return `<div class="system-section"><div class="system-heading">${title}</div>${entries}</div>`;
+}
+function renderSystemInfo() {
+    if (!systemInfo || !systemCard)
+        return;
+    if (!state.data) {
+        systemCard.hidden = true;
+        systemInfo.innerHTML = "";
+        return;
+    }
+    const cpu = state.data.cpu_info;
+    const gpu = state.data.gpu_info;
+    const kernels = state.data.gpu_kernels?.length || 0;
+    const memoryEvents = state.data.memory_events?.length || 0;
+    const gpuMemoryEvents = state.data.gpu_memory_events?.length || 0;
+    const frames = state.data.frames?.length || 0;
+    const ffiCalls = state.data.ffi_calls?.length || 0;
+    const sections = [];
+    if (cpu) {
+        const rows = [];
+        if (cpu.name)
+            rows.push(["Name", cpu.name]);
+        if (typeof cpu.cores === "number")
+            rows.push(["Cores", cpu.cores.toString()]);
+        if (typeof cpu.threads === "number")
+            rows.push(["Threads", cpu.threads.toString()]);
+        if (typeof cpu.frequency_mhz === "number")
+            rows.push(["Clock", formatFrequencyMhz(cpu.frequency_mhz)]);
+        if (rows.length > 0)
+            sections.push(renderSystemSection("CPU", rows));
+    }
+    if (gpu) {
+        const rows = [];
+        if (gpu.name)
+            rows.push(["Name", gpu.name]);
+        if (gpu.vendor)
+            rows.push(["Vendor", gpu.vendor]);
+        if (typeof gpu.compute_units === "number")
+            rows.push(["Compute Units", gpu.compute_units.toString()]);
+        if (typeof gpu.memory_bytes === "number")
+            rows.push(["Memory", formatValue(gpu.memory_bytes, "bytes")]);
+        if (typeof gpu.peak_bandwidth_gbps === "number")
+            rows.push(["Peak Bandwidth", formatBandwidthGbps(gpu.peak_bandwidth_gbps)]);
+        if (rows.length > 0)
+            sections.push(renderSystemSection("GPU", rows));
+    }
+    const activityRows = [];
+    if (kernels > 0)
+        activityRows.push(["GPU kernels", kernels.toString()]);
+    if (memoryEvents > 0)
+        activityRows.push(["CPU memory events", memoryEvents.toString()]);
+    if (gpuMemoryEvents > 0)
+        activityRows.push(["GPU memory events", gpuMemoryEvents.toString()]);
+    if (frames > 0)
+        activityRows.push(["Frames", frames.toString()]);
+    if (ffiCalls > 0)
+        activityRows.push(["FFI calls", ffiCalls.toString()]);
+    if (activityRows.length > 0)
+        sections.push(renderSystemSection("Runtime Activity", activityRows));
+    systemCard.hidden = false;
+    if (sections.length === 0) {
+        systemInfo.innerHTML = `<div class="system-empty">No runtime metadata in this file.</div>`;
+    }
+    else {
+        systemInfo.innerHTML = sections.join("");
+    }
+}
 function renderTreemap() {
     if (!state.data || !treemapEl || !state.sizeKey || !state.colorKey)
         return;
@@ -528,6 +614,7 @@ fileInput?.addEventListener("change", async (event) => {
     }
     updateMetricSelectors();
     renderTreemap();
+    renderSystemInfo();
 });
 async function loadFromUrl(url) {
     const resolved = new URL(url, window.location.href).toString();
@@ -542,6 +629,7 @@ async function loadFromUrl(url) {
     updateMetricSelectors();
     applyMetricOverrides();
     renderTreemap();
+    renderSystemInfo();
 }
 if (initialRoot && rootInput) {
     state.rootPrefix = initialRoot;
@@ -714,11 +802,12 @@ function showKernelTooltip(event, kernel) {
     if (!tooltip)
         return;
     const durationMs = ((kernel.duration_ns || 0) / 1e6).toFixed(3);
+    const bandwidth = kernel.achieved_bandwidth_gbps ?? kernel.bandwidth_gbps;
     tooltip.innerHTML = `
     <div><strong>${kernel.name}</strong></div>
     <div>Duration: ${durationMs} ms</div>
     ${kernel.occupancy_percent ? `<div>Occupancy: ${kernel.occupancy_percent.toFixed(1)}%</div>` : ""}
-    ${kernel.bandwidth_gbps ? `<div>Bandwidth: ${kernel.bandwidth_gbps.toFixed(1)} GB/s</div>` : ""}
+    ${bandwidth ? `<div>Bandwidth: ${bandwidth.toFixed(1)} GB/s</div>` : ""}
     ${kernel.lean_decl ? `<div>Decl: ${kernel.lean_decl}</div>` : ""}
   `;
     tooltip.hidden = false;
@@ -734,11 +823,17 @@ function renderAllocs() {
     const height = allocsEl.clientHeight || 500;
     const margin = { top: 40, right: 30, bottom: 50, left: 80 };
     // Get memory events from data
-    const events = state.data.memory_events || [];
+    const cpuEvents = state.data.memory_events || [];
+    const gpuEvents = state.data.gpu_memory_events || [];
+    const events = cpuEvents.length > 0 ? cpuEvents : gpuEvents;
+    const usingGpuEvents = cpuEvents.length === 0 && gpuEvents.length > 0;
+    if (allocsTitle) {
+        allocsTitle.textContent = usingGpuEvents ? "GPU Memory Allocations" : "Memory Allocations";
+    }
     if (events.length === 0) {
         allocsEl.innerHTML = `
       <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted);">
-        <p>No memory event data available. Import a trace with memory_events in your JSON.</p>
+        <p>No memory event data available. Import a trace with memory_events or gpu_memory_events in your JSON.</p>
       </div>
     `;
         return;
@@ -747,7 +842,8 @@ function renderAllocs() {
     let balance = 0;
     const timeline = [];
     events.forEach((e, idx) => {
-        balance += e.type === "alloc" ? e.bytes : -e.bytes;
+        const delta = e.type === "alloc" || e.type === "realloc" ? e.bytes : e.type === "free" ? -e.bytes : 0;
+        balance += delta;
         timeline.push({ time: e.timestamp_ns || idx, balance, event: e });
     });
     // Create scales
@@ -756,9 +852,10 @@ function renderAllocs() {
         .domain([0, timeline.length - 1])
         .range([margin.left, width - margin.right]);
     const maxBalance = Math.max(...timeline.map((t) => Math.abs(t.balance)));
+    const safeMaxBalance = maxBalance === 0 ? 1 : maxBalance;
     const yScale = d3
         .scaleLinear()
-        .domain([0, maxBalance])
+        .domain([0, safeMaxBalance])
         .range([height - margin.bottom, margin.top]);
     // Create SVG
     const svg = d3
@@ -829,8 +926,15 @@ function showAllocTooltip(event, data) {
     if (!tooltip)
         return;
     const e = data.event;
+    const label = e.type === "alloc"
+        ? "Allocation"
+        : e.type === "free"
+            ? "Free"
+            : e.type === "realloc"
+                ? "Realloc"
+                : e.type.replace(/_/g, " ");
     tooltip.innerHTML = `
-    <div><strong>${e.type === "alloc" ? "Allocation" : "Free"}</strong></div>
+    <div><strong>${label}</strong></div>
     <div>Size: ${formatValue(e.bytes, "bytes")}</div>
     <div>Balance: ${formatValue(data.balance, "bytes")}</div>
     ${e.lean_decl ? `<div>Decl: ${e.lean_decl}</div>` : ""}

@@ -2241,6 +2241,42 @@ def registerCollector (c : Collector) : IO Unit :=
     acc := mergeByFile acc m
   return acc
 
+def runtimeExtrasFromJson (json : Json) : Array (String × Json) := Id.run do
+  let mut extras : Array (String × Json) := #[]
+  if let some cpuInfo := (json.getObjValAs? Json "cpu_info").toOption then
+    extras := extras.push ("cpu_info", cpuInfo)
+  if let some gpuInfo := (json.getObjValAs? Json "gpu_info").toOption then
+    extras := extras.push ("gpu_info", gpuInfo)
+  match json.getObjValAs? (Array Json) "gpu_kernels" with
+  | .ok arr => if !arr.isEmpty then extras := extras.push ("gpu_kernels", Json.arr arr)
+  | .error _ => ()
+  match json.getObjValAs? (Array Json) "memory_events" with
+  | .ok arr => if !arr.isEmpty then extras := extras.push ("memory_events", Json.arr arr)
+  | .error _ => ()
+  match json.getObjValAs? (Array Json) "gpu_memory_events" with
+  | .ok arr => if !arr.isEmpty then extras := extras.push ("gpu_memory_events", Json.arr arr)
+  | .error _ => ()
+  match json.getObjValAs? (Array Json) "frames" with
+  | .ok arr => if !arr.isEmpty then extras := extras.push ("frames", Json.arr arr)
+  | .error _ => ()
+  match json.getObjValAs? (Array Json) "ffi_calls" with
+  | .ok arr => if !arr.isEmpty then extras := extras.push ("ffi_calls", Json.arr arr)
+  | .error _ => ()
+  return extras
+
+def readRuntimeExtras (path : System.FilePath) : IO (Array (String × Json)) := do
+  let content ← IO.FS.readFile path
+  match Json.parse content with
+  | .ok json => return runtimeExtrasFromJson json
+  | .error err =>
+      IO.eprintln s!"warning: failed to parse runtime JSON extras ({path}): {err}"
+      return #[]
+
+def appendRuntimeExtras (cfg : ObserveConfig) (fields : Array (String × Json)) : IO (Array (String × Json)) := do
+  match cfg.gpuJson? with
+  | some path => return fields ++ (← readRuntimeExtras (System.FilePath.mk path))
+  | none => return fields
+
 
 @[inline] def artifactJson (cfg : ObserveConfig) (generatedAt : String) : IO Json := do
   if cfg.sample then
@@ -2291,8 +2327,8 @@ def registerCollector (c : Collector) : IO Unit :=
     writeEntries cfg rootPath rootAcc
     writeSpans cfg rootPath rootAcc
     printProfileTop cfg {}
-    return Json.mkObj
-      [ ("schema_version", Json.str cfg.schemaVersion)
+    let baseFields : Array (String × Json) :=
+      #[ ("schema_version", Json.str cfg.schemaVersion)
       , ("generated_at", Json.str generatedAt)
       , ("project", Json.mkObj
           [ ("name", Json.str "LeanProject")
@@ -2303,6 +2339,8 @@ def registerCollector (c : Collector) : IO Unit :=
       , ("metrics", Json.arr (specs.map MetricSpec.toJson))
       , ("root", nodeAccToJson rootAcc)
       ]
+    let fields ← appendRuntimeExtras cfg baseFields
+    return Json.mkObj fields.toList
   let root := System.FilePath.mk cfg.root
   let filesAll ← listLeanFiles root
   let files := match cfg.maxFiles? with
@@ -2327,8 +2365,8 @@ def registerCollector (c : Collector) : IO Unit :=
   writeEntries cfg root rootAcc
   writeSpans cfg root rootAcc
   printProfileTop cfg cmdMap
-  return Json.mkObj
-    [ ("schema_version", Json.str cfg.schemaVersion)
+  let baseFields : Array (String × Json) :=
+    #[ ("schema_version", Json.str cfg.schemaVersion)
     , ("generated_at", Json.str generatedAt)
     , ("project", Json.mkObj
         [ ("name", Json.str "LeanProject")
@@ -2339,6 +2377,8 @@ def registerCollector (c : Collector) : IO Unit :=
     , ("metrics", Json.arr (specs.map MetricSpec.toJson))
     , ("root", nodeAccToJson rootAcc)
     ]
+  let fields ← appendRuntimeExtras cfg baseFields
+  return Json.mkObj fields.toList
 
 @[inline] def runLeanObserveCmd (p : Cli.Parsed) : IO UInt32 := do
   try
