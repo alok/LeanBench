@@ -113,6 +113,12 @@ exercise the in-process API as well as the CLI.
 LeanObserve CLI:
 - `--command-nodes` includes all commands (including non-decls).
 - `--decl-nodes` includes only named declarations (implies `--command-nodes`).
+- `leanobserve` reads `observatory.toml` or `leanbench.toml` from the current directory.
+- Select a profile with `--profile` or `LEANOBSERVATORY_PROFILE` (default: `default`).
+- Apply tool overrides with `--tool` or `LEANOBSERVATORY_TOOL`.
+- Use `--config` to point at a specific config file and `--print-config` to show the resolved config.
+- Precedence: CLI > env vars > tool overrides > profile > defaults.
+- Example config: `observatory.toml.example`.
 
 ## Suites
 

@@ -1,6 +1,9 @@
 import Cli
 import Lean
 import Std
+import Lean.Parser
+import Lake.Toml
+import Lake.Util.Message
 import LeanBench.TextScan
 import LeanBench.ParsecScan
 import LeanBench.Runtime
@@ -37,19 +40,166 @@ structure ObserveConfig where
   tracyTrace? : Option String := none
   dtraceOutput? : Option String := none
 
-@[inline] def configFromParsed (p : Cli.Parsed) : ObserveConfig :=
+structure ObserveConfigPatch where
+  root? : Option String := none
+  out? : Option String := none
+  schemaVersion? : Option String := none
+  sample? : Option Bool := none
+  maxFiles? : Option Nat := none
+  buildLog? : Option String := none
+  profileJson? : Option String := none
+  infoTree? : Option Bool := none
+  infoTreeJobs? : Option Nat := none
+  commandNodes? : Option Bool := none
+  declNodesOnly? : Option Bool := none
+  reportJson? : Option String := none
+  reportMd? : Option String := none
+  reportTop? : Option Nat := none
+  entriesOut? : Option String := none
+  spansOut? : Option String := none
+  perfScript? : Option String := none
+  perfStat? : Option String := none
+  instrumentsTrace? : Option String := none
+  metalTrace? : Option String := none
+  gpuJson? : Option String := none
+  cudaKernels? : Option String := none
+  cudaApi? : Option String := none
+  tracyTrace? : Option String := none
+  dtraceOutput? : Option String := none
+  deriving Inhabited
+
+instance : EmptyCollection ObserveConfigPatch where
+  emptyCollection := (default : ObserveConfigPatch)
+
+structure ObserveProfile where
+  inherits? : Option Name := none
+  config : ObserveConfigPatch := default
+  deriving Inhabited
+
+structure ObserveConfigFile where
+  profiles : Std.HashMap Name ObserveProfile := {}
+  tools : Std.HashMap Name ObserveConfigPatch := {}
+  deriving Inhabited
+
+structure ObserveCliOverrides where
+  configPath? : Option String := none
+  profile? : Option String := none
+  tool? : Option String := none
+  printConfig : Bool := false
+  patch : ObserveConfigPatch := default
+  deriving Inhabited
+
+structure ObserveEnvOverrides where
+  configPath? : Option String := none
+  profile? : Option String := none
+  tool? : Option String := none
+  printConfig : Bool := false
+  patch : ObserveConfigPatch := default
+  deriving Inhabited
+
+structure ObserveConfigResolveMeta where
+  configPath? : Option System.FilePath := none
+  profile : Name := `default
+  tool? : Option Name := none
+  usedConfig : Bool := false
+  printConfig : Bool := false
+  deriving Inhabited
+
+@[inline] def tomlKey (s : String) : Name :=
+  Name.mkSimple s
+
+@[inline] def mergeOpt (a b : Option α) : Option α :=
+  match a with
+  | some _ => a
+  | none => b
+
+def ObserveConfigPatch.merge (base overlay : ObserveConfigPatch) : ObserveConfigPatch :=
+  { root? := mergeOpt overlay.root? base.root?
+  , out? := mergeOpt overlay.out? base.out?
+  , schemaVersion? := mergeOpt overlay.schemaVersion? base.schemaVersion?
+  , sample? := mergeOpt overlay.sample? base.sample?
+  , maxFiles? := mergeOpt overlay.maxFiles? base.maxFiles?
+  , buildLog? := mergeOpt overlay.buildLog? base.buildLog?
+  , profileJson? := mergeOpt overlay.profileJson? base.profileJson?
+  , infoTree? := mergeOpt overlay.infoTree? base.infoTree?
+  , infoTreeJobs? := mergeOpt overlay.infoTreeJobs? base.infoTreeJobs?
+  , commandNodes? := mergeOpt overlay.commandNodes? base.commandNodes?
+  , declNodesOnly? := mergeOpt overlay.declNodesOnly? base.declNodesOnly?
+  , reportJson? := mergeOpt overlay.reportJson? base.reportJson?
+  , reportMd? := mergeOpt overlay.reportMd? base.reportMd?
+  , reportTop? := mergeOpt overlay.reportTop? base.reportTop?
+  , entriesOut? := mergeOpt overlay.entriesOut? base.entriesOut?
+  , spansOut? := mergeOpt overlay.spansOut? base.spansOut?
+  , perfScript? := mergeOpt overlay.perfScript? base.perfScript?
+  , perfStat? := mergeOpt overlay.perfStat? base.perfStat?
+  , instrumentsTrace? := mergeOpt overlay.instrumentsTrace? base.instrumentsTrace?
+  , metalTrace? := mergeOpt overlay.metalTrace? base.metalTrace?
+  , gpuJson? := mergeOpt overlay.gpuJson? base.gpuJson?
+  , cudaKernels? := mergeOpt overlay.cudaKernels? base.cudaKernels?
+  , cudaApi? := mergeOpt overlay.cudaApi? base.cudaApi?
+  , tracyTrace? := mergeOpt overlay.tracyTrace? base.tracyTrace?
+  , dtraceOutput? := mergeOpt overlay.dtraceOutput? base.dtraceOutput?
+  }
+
+def applyPatch (cfg : ObserveConfig) (p : ObserveConfigPatch) : ObserveConfig :=
+  { cfg with
+    root := p.root?.getD cfg.root
+    out? := mergeOpt p.out? cfg.out?
+    schemaVersion := p.schemaVersion?.getD cfg.schemaVersion
+    sample := p.sample?.getD cfg.sample
+    maxFiles? := mergeOpt p.maxFiles? cfg.maxFiles?
+    buildLog? := mergeOpt p.buildLog? cfg.buildLog?
+    profileJson? := mergeOpt p.profileJson? cfg.profileJson?
+    infoTree := p.infoTree?.getD cfg.infoTree
+    infoTreeJobs := p.infoTreeJobs?.getD cfg.infoTreeJobs
+    commandNodes := p.commandNodes?.getD cfg.commandNodes
+    declNodesOnly := p.declNodesOnly?.getD cfg.declNodesOnly
+    reportJson? := mergeOpt p.reportJson? cfg.reportJson?
+    reportMd? := mergeOpt p.reportMd? cfg.reportMd?
+    reportTop := p.reportTop?.getD cfg.reportTop
+    entriesOut? := mergeOpt p.entriesOut? cfg.entriesOut?
+    spansOut? := mergeOpt p.spansOut? cfg.spansOut?
+    perfScript? := mergeOpt p.perfScript? cfg.perfScript?
+    perfStat? := mergeOpt p.perfStat? cfg.perfStat?
+    instrumentsTrace? := mergeOpt p.instrumentsTrace? cfg.instrumentsTrace?
+    metalTrace? := mergeOpt p.metalTrace? cfg.metalTrace?
+    gpuJson? := mergeOpt p.gpuJson? cfg.gpuJson?
+    cudaKernels? := mergeOpt p.cudaKernels? cfg.cudaKernels?
+    cudaApi? := mergeOpt p.cudaApi? cfg.cudaApi?
+    tracyTrace? := mergeOpt p.tracyTrace? cfg.tracyTrace?
+    dtraceOutput? := mergeOpt p.dtraceOutput? cfg.dtraceOutput?
+  }
+
+def finalizeConfig (cfg : ObserveConfig) : ObserveConfig :=
   Id.run do
-    let mut cfg : ObserveConfig := {}
+    let mut cfg := cfg
+    if cfg.commandNodes then
+      cfg := { cfg with infoTree := true }
+    if cfg.declNodesOnly then
+      cfg := { cfg with commandNodes := true, infoTree := true }
+    if cfg.spansOut?.isSome then
+      cfg := { cfg with commandNodes := true, infoTree := true }
+    let hasRuntime :=
+      cfg.perfScript?.isSome || cfg.perfStat?.isSome || cfg.instrumentsTrace?.isSome ||
+      cfg.metalTrace?.isSome || cfg.gpuJson?.isSome || cfg.cudaKernels?.isSome ||
+      cfg.cudaApi?.isSome || cfg.tracyTrace?.isSome || cfg.dtraceOutput?.isSome
+    if hasRuntime && !cfg.commandNodes then
+      cfg := { cfg with commandNodes := true, infoTree := true }
+    return cfg
+
+def patchFromParsed (p : Cli.Parsed) : ObserveConfigPatch :=
+  Id.run do
+    let mut cfg : ObserveConfigPatch := default
     if p.hasFlag "sample" then
-      cfg := { cfg with sample := true }
+      cfg := { cfg with sample? := some true }
     match p.flag? "root" with
-    | some f => cfg := { cfg with root := f.as! String }
+    | some f => cfg := { cfg with root? := some (f.as! String) }
     | none => pure ()
     match p.flag? "out" with
     | some f => cfg := { cfg with out? := some (f.as! String) }
     | none => pure ()
     match p.flag? "schema-version" with
-    | some f => cfg := { cfg with schemaVersion := f.as! String }
+    | some f => cfg := { cfg with schemaVersion? := some (f.as! String) }
     | none => pure ()
     match p.flag? "max-files" with
     | some f => cfg := { cfg with maxFiles? := some (f.as! Nat) }
@@ -61,14 +211,14 @@ structure ObserveConfig where
     | some f => cfg := { cfg with profileJson? := some (f.as! String) }
     | none => pure ()
     if p.hasFlag "infotree" then
-      cfg := { cfg with infoTree := true }
+      cfg := { cfg with infoTree? := some true }
     match p.flag? "infotree-jobs" with
-    | some f => cfg := { cfg with infoTreeJobs := f.as! Nat }
+    | some f => cfg := { cfg with infoTreeJobs? := some (f.as! Nat) }
     | none => pure ()
     if p.hasFlag "command-nodes" then
-      cfg := { cfg with commandNodes := true, infoTree := true }
+      cfg := { cfg with commandNodes? := some true }
     if p.hasFlag "decl-nodes" then
-      cfg := { cfg with commandNodes := true, declNodesOnly := true, infoTree := true }
+      cfg := { cfg with commandNodes? := some true, declNodesOnly? := some true }
     match p.flag? "report-json" with
     | some f => cfg := { cfg with reportJson? := some (f.as! String) }
     | none => pure ()
@@ -76,7 +226,7 @@ structure ObserveConfig where
     | some f => cfg := { cfg with reportMd? := some (f.as! String) }
     | none => pure ()
     match p.flag? "report-top" with
-    | some f => cfg := { cfg with reportTop := f.as! Nat }
+    | some f => cfg := { cfg with reportTop? := some (f.as! Nat) }
     | none => pure ()
     match p.flag? "entries-out" with
     | some f => cfg := { cfg with entriesOut? := some (f.as! String) }
@@ -112,15 +262,355 @@ structure ObserveConfig where
     match p.flag? "dtrace" with
     | some f => cfg := { cfg with dtraceOutput? := some (f.as! String) }
     | none => pure ()
-    if cfg.spansOut?.isSome then
-      cfg := { cfg with commandNodes := true, infoTree := true }
-    let hasRuntime :=
-      cfg.perfScript?.isSome || cfg.perfStat?.isSome || cfg.instrumentsTrace?.isSome ||
-      cfg.metalTrace?.isSome || cfg.gpuJson?.isSome || cfg.cudaKernels?.isSome ||
-      cfg.cudaApi?.isSome || cfg.tracyTrace?.isSome || cfg.dtraceOutput?.isSome
-    if hasRuntime && !cfg.commandNodes then
-      cfg := { cfg with commandNodes := true, infoTree := true }
     return cfg
+
+def cliOverridesFromParsed (p : Cli.Parsed) : ObserveCliOverrides :=
+  Id.run do
+    let mut cfg : ObserveCliOverrides := { patch := patchFromParsed p }
+    match p.flag? "config" with
+    | some f => cfg := { cfg with configPath? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "profile" with
+    | some f => cfg := { cfg with profile? := some (f.as! String) }
+    | none => pure ()
+    match p.flag? "tool" with
+    | some f => cfg := { cfg with tool? := some (f.as! String) }
+    | none => pure ()
+    if p.hasFlag "print-config" then
+      cfg := { cfg with printConfig := true }
+    return cfg
+
+def parseBool (raw : String) : Option Bool :=
+  let s := raw.trimAscii.toString.toLower
+  if s == "1" || s == "true" || s == "yes" || s == "on" then
+    some true
+  else if s == "0" || s == "false" || s == "no" || s == "off" then
+    some false
+  else
+    none
+
+def envBool (name : String) : IO (Option Bool) := do
+  match (← IO.getEnv name) with
+  | none => pure none
+  | some raw =>
+    match parseBool raw with
+    | some v => pure (some v)
+    | none => throw <| IO.userError s!"invalid boolean for {name}: {raw}"
+
+def envNat (name : String) : IO (Option Nat) := do
+  match (← IO.getEnv name) with
+  | none => pure none
+  | some raw =>
+    match raw.toNat? with
+    | some v => pure (some v)
+    | none => throw <| IO.userError s!"invalid Nat for {name}: {raw}"
+
+def envOverrides : IO ObserveEnvOverrides := do
+  let mut cfg : ObserveEnvOverrides := default
+  cfg := { cfg with configPath? := (← IO.getEnv "LEANOBSERVATORY_CONFIG") }
+  cfg := { cfg with profile? := (← IO.getEnv "LEANOBSERVATORY_PROFILE") }
+  cfg := { cfg with tool? := (← IO.getEnv "LEANOBSERVATORY_TOOL") }
+  cfg := { cfg with printConfig := (← envBool "LEANOBSERVATORY_PRINT_CONFIG").getD false }
+  let root? := (← IO.getEnv "LEANOBSERVATORY_ROOT")
+  let out? := (← IO.getEnv "LEANOBSERVATORY_OUT")
+  let schemaVersion? := (← IO.getEnv "LEANOBSERVATORY_SCHEMA_VERSION")
+  let sample? ← envBool "LEANOBSERVATORY_SAMPLE"
+  let maxFiles? ← envNat "LEANOBSERVATORY_MAX_FILES"
+  let buildLog? := (← IO.getEnv "LEANOBSERVATORY_BUILD_LOG")
+  let profileJson? := (← IO.getEnv "LEANOBSERVATORY_PROFILE_JSON")
+  let infoTree? ← envBool "LEANOBSERVATORY_INFOTREE"
+  let infoTreeJobs? ← envNat "LEANOBSERVATORY_INFOTREE_JOBS"
+  let commandNodes? ← envBool "LEANOBSERVATORY_COMMAND_NODES"
+  let declNodesOnly? ← envBool "LEANOBSERVATORY_DECL_NODES"
+  let reportJson? := (← IO.getEnv "LEANOBSERVATORY_REPORT_JSON")
+  let reportMd? := (← IO.getEnv "LEANOBSERVATORY_REPORT_MD")
+  let reportTop? ← envNat "LEANOBSERVATORY_REPORT_TOP"
+  let entriesOut? := (← IO.getEnv "LEANOBSERVATORY_ENTRIES_OUT")
+  let spansOut? := (← IO.getEnv "LEANOBSERVATORY_SPANS_OUT")
+  let perfScript? := (← IO.getEnv "LEANOBSERVATORY_PERF")
+  let perfStat? := (← IO.getEnv "LEANOBSERVATORY_PERF_STAT")
+  let instrumentsTrace? := (← IO.getEnv "LEANOBSERVATORY_INSTRUMENTS")
+  let metalTrace? := (← IO.getEnv "LEANOBSERVATORY_METAL")
+  let gpuJson? := (← IO.getEnv "LEANOBSERVATORY_GPU_JSON")
+  let cudaKernels? := (← IO.getEnv "LEANOBSERVATORY_CUDA")
+  let cudaApi? := (← IO.getEnv "LEANOBSERVATORY_CUDA_API")
+  let tracyTrace? := (← IO.getEnv "LEANOBSERVATORY_TRACY")
+  let dtraceOutput? := (← IO.getEnv "LEANOBSERVATORY_DTRACE")
+  cfg := {
+    cfg with
+    patch := {
+      root? := root?
+      out? := out?
+      schemaVersion? := schemaVersion?
+      sample? := sample?
+      maxFiles? := maxFiles?
+      buildLog? := buildLog?
+      profileJson? := profileJson?
+      infoTree? := infoTree?
+      infoTreeJobs? := infoTreeJobs?
+      commandNodes? := commandNodes?
+      declNodesOnly? := declNodesOnly?
+      reportJson? := reportJson?
+      reportMd? := reportMd?
+      reportTop? := reportTop?
+      entriesOut? := entriesOut?
+      spansOut? := spansOut?
+      perfScript? := perfScript?
+      perfStat? := perfStat?
+      instrumentsTrace? := instrumentsTrace?
+      metalTrace? := metalTrace?
+      gpuJson? := gpuJson?
+      cudaKernels? := cudaKernels?
+      cudaApi? := cudaApi?
+      tracyTrace? := tracyTrace?
+      dtraceOutput? := dtraceOutput?
+    }
+  }
+  return cfg
+
+def decodePatchFromTable (t : Lake.Toml.Table) : Lake.Toml.DecodeM ObserveConfigPatch := do
+  let root? ← t.tryDecode? (tomlKey "root")
+  let out? ← t.tryDecode? (tomlKey "out")
+  let schemaVersion? ← t.tryDecode? (tomlKey "schema-version")
+  let sample? ← t.tryDecode? (tomlKey "sample")
+  let maxFiles? ← t.tryDecode? (tomlKey "max-files")
+  let buildLog? ← t.tryDecode? (tomlKey "build-log")
+  let profileJson? ← t.tryDecode? (tomlKey "profile-json")
+  let infoTree? ← t.tryDecode? (tomlKey "infotree")
+  let infoTreeJobs? ← t.tryDecode? (tomlKey "infotree-jobs")
+  let commandNodes? ← t.tryDecode? (tomlKey "command-nodes")
+  let declNodesOnly? ← t.tryDecode? (tomlKey "decl-nodes")
+  let reportJson? ← t.tryDecode? (tomlKey "report-json")
+  let reportMd? ← t.tryDecode? (tomlKey "report-md")
+  let reportTop? ← t.tryDecode? (tomlKey "report-top")
+  let entriesOut? ← t.tryDecode? (tomlKey "entries-out")
+  let spansOut? ← t.tryDecode? (tomlKey "spans-out")
+  let perfScript? ← t.tryDecode? (tomlKey "perf")
+  let perfStat? ← t.tryDecode? (tomlKey "perf-stat")
+  let instrumentsTrace? ← t.tryDecode? (tomlKey "instruments")
+  let metalTrace? ← t.tryDecode? (tomlKey "metal")
+  let gpuJson? ← t.tryDecode? (tomlKey "gpu-json")
+  let cudaKernels? ← t.tryDecode? (tomlKey "cuda")
+  let cudaApi? ← t.tryDecode? (tomlKey "cuda-api")
+  let tracyTrace? ← t.tryDecode? (tomlKey "tracy")
+  let dtraceOutput? ← t.tryDecode? (tomlKey "dtrace")
+  return {
+    root? := root?
+    out? := out?
+    schemaVersion? := schemaVersion?
+    sample? := sample?
+    maxFiles? := maxFiles?
+    buildLog? := buildLog?
+    profileJson? := profileJson?
+    infoTree? := infoTree?
+    infoTreeJobs? := infoTreeJobs?
+    commandNodes? := commandNodes?
+    declNodesOnly? := declNodesOnly?
+    reportJson? := reportJson?
+    reportMd? := reportMd?
+    reportTop? := reportTop?
+    entriesOut? := entriesOut?
+    spansOut? := spansOut?
+    perfScript? := perfScript?
+    perfStat? := perfStat?
+    instrumentsTrace? := instrumentsTrace?
+    metalTrace? := metalTrace?
+    gpuJson? := gpuJson?
+    cudaKernels? := cudaKernels?
+    cudaApi? := cudaApi?
+    tracyTrace? := tracyTrace?
+    dtraceOutput? := dtraceOutput?
+  }
+
+def decodeProfiles (t : Lake.Toml.Table) : Lake.Toml.DecodeM (Std.HashMap Name ObserveProfile) := do
+  let mut profiles : Std.HashMap Name ObserveProfile := {}
+  for (k, v) in t.items do
+    match v with
+    | .table _ table =>
+        let inherits? ← table.tryDecode? (tomlKey "inherits")
+        let cfg ← decodePatchFromTable table
+        let entry : ObserveProfile := {
+          inherits? := inherits?.map Name.mkSimple
+          config := cfg
+        }
+        profiles := profiles.insert k entry
+    | _ =>
+        modify fun es => es.push {
+          ref := v.ref
+          msg := s!"expected table for profile {Lake.Toml.ppKey k}"
+        }
+  return profiles
+
+def decodeTools (t : Lake.Toml.Table) : Lake.Toml.DecodeM (Std.HashMap Name ObserveConfigPatch) := do
+  let mut tools : Std.HashMap Name ObserveConfigPatch := {}
+  for (k, v) in t.items do
+    match v with
+    | .table _ table =>
+        let cfg ← decodePatchFromTable table
+        tools := tools.insert k cfg
+    | _ =>
+        modify fun es => es.push {
+          ref := v.ref
+          msg := s!"expected table for tool {Lake.Toml.ppKey k}"
+        }
+  return tools
+
+def formatDecodeErrors (ictx : Parser.InputContext) (errs : Array Lake.Toml.DecodeError) : IO String := do
+  errs.foldlM (init := "") fun acc e => do
+    let pos := ictx.fileMap.toPosition (e.ref.getPos?.getD 0)
+    let msg := Lean.mkErrorStringWithPos ictx.fileName pos e.msg (kind := some "error")
+    return acc ++ msg ++ "\n"
+
+def loadConfigFile (path : System.FilePath) : IO ObserveConfigFile := do
+  let input ← IO.FS.readFile path
+  let ictx := Parser.mkInputContext input path.toString
+  let table ← match (← Lake.Toml.loadToml ictx |>.toBaseIO) with
+    | .ok table => pure table
+    | .error log =>
+        let msg ← Lake.mkMessageLogString log
+        throw <| IO.userError msg
+  let .ok cfg errs := EStateM.run (s := #[]) do
+    let profiles? ← table.tryDecode? (tomlKey "profile")
+    let profileMap ← match profiles? with
+      | some profiles => decodeProfiles profiles
+      | none => pure {}
+    let tools? ← table.tryDecode? (tomlKey "tool")
+    let toolMap ← match tools? with
+      | some tools => decodeTools tools
+      | none => pure {}
+    return { profiles := profileMap, tools := toolMap }
+  if !errs.isEmpty then
+    let msg ← formatDecodeErrors ictx errs
+    throw <| IO.userError msg
+  return cfg
+
+partial def resolveProfilePatch
+    (profiles : Std.HashMap Name ObserveProfile)
+    (name : Name)
+    (stack : List Name := []) : Except String ObserveConfigPatch := do
+  if stack.contains name then
+    throw s!"profile inheritance cycle involving '{name}'"
+  match profiles.get? name with
+  | none =>
+      if profiles.isEmpty && name == `default then
+        return default
+      else
+        throw s!"unknown profile '{name}'"
+  | some profile =>
+      match profile.inherits? with
+      | none => return profile.config
+      | some parent =>
+          let base ← resolveProfilePatch profiles parent (name :: stack)
+          return base.merge profile.config
+
+def resolveToolPatch
+    (tools : Std.HashMap Name ObserveConfigPatch)
+    (tool? : Option Name) : Except String ObserveConfigPatch := do
+  match tool? with
+  | none => return default
+  | some tool =>
+      match tools.get? tool with
+      | some cfg => return cfg
+      | none => throw s!"unknown tool override '{tool}'"
+
+def resolveConfigPath (cli? env? : Option String) : IO (Option System.FilePath) := do
+  match cli? with
+  | some path => return some (System.FilePath.mk path)
+  | none =>
+      match env? with
+      | some path => return some (System.FilePath.mk path)
+      | none =>
+          let cwd ← IO.currentDir
+          let candidates := #[cwd / "observatory.toml", cwd / "leanbench.toml"]
+          for path in candidates do
+            if (← path.pathExists) then
+              return some path
+          return none
+
+def configToJson (cfg : ObserveConfig) : Json :=
+  let jsonOpt (v : Option String) : Json := match v with | some x => Json.str x | none => Json.null
+  let jsonNat (v : Option Nat) : Json := match v with | some x => Json.num x | none => Json.null
+  Json.mkObj
+    [ ("root", Json.str cfg.root)
+    , ("out", jsonOpt cfg.out?)
+    , ("schema_version", Json.str cfg.schemaVersion)
+    , ("sample", Json.bool cfg.sample)
+    , ("max_files", jsonNat cfg.maxFiles?)
+    , ("build_log", jsonOpt cfg.buildLog?)
+    , ("profile_json", jsonOpt cfg.profileJson?)
+    , ("infotree", Json.bool cfg.infoTree)
+    , ("infotree_jobs", Json.num cfg.infoTreeJobs)
+    , ("command_nodes", Json.bool cfg.commandNodes)
+    , ("decl_nodes_only", Json.bool cfg.declNodesOnly)
+    , ("report_json", jsonOpt cfg.reportJson?)
+    , ("report_md", jsonOpt cfg.reportMd?)
+    , ("report_top", Json.num cfg.reportTop)
+    , ("entries_out", jsonOpt cfg.entriesOut?)
+    , ("spans_out", jsonOpt cfg.spansOut?)
+    , ("perf", jsonOpt cfg.perfScript?)
+    , ("perf_stat", jsonOpt cfg.perfStat?)
+    , ("instruments", jsonOpt cfg.instrumentsTrace?)
+    , ("metal", jsonOpt cfg.metalTrace?)
+    , ("gpu_json", jsonOpt cfg.gpuJson?)
+    , ("cuda", jsonOpt cfg.cudaKernels?)
+    , ("cuda_api", jsonOpt cfg.cudaApi?)
+    , ("tracy", jsonOpt cfg.tracyTrace?)
+    , ("dtrace", jsonOpt cfg.dtraceOutput?)
+    ]
+
+def resolvedConfigToJson (cfg : ObserveConfig) (resolveMeta : ObserveConfigResolveMeta) : Json :=
+  let toolJson : Json := match resolveMeta.tool? with
+    | some tool => Json.str tool.toString
+    | none => Json.null
+  let pathJson : Json := match resolveMeta.configPath? with
+    | some path => Json.str path.toString
+    | none => Json.null
+  Json.mkObj
+    [ ("config_path", pathJson)
+    , ("profile", Json.str resolveMeta.profile.toString)
+    , ("tool", toolJson)
+    , ("config", configToJson cfg)
+    ]
+
+def resolveConfigFromParsed (p : Cli.Parsed) : IO (ObserveConfig × ObserveConfigResolveMeta) := do
+  let cli := cliOverridesFromParsed p
+  let env ← envOverrides
+  let configPath? ← resolveConfigPath cli.configPath? env.configPath?
+  let configFile? ← match configPath? with
+    | some path =>
+        if (← path.pathExists) then
+          some <$> loadConfigFile path
+        else
+          throw <| IO.userError s!"config file not found: {path}"
+    | none => pure none
+  let profileName := Name.mkSimple <| (mergeOpt cli.profile? env.profile?).getD "default"
+  let toolName? := (mergeOpt cli.tool? env.tool?).map Name.mkSimple
+  let profilePatch ← match configFile? with
+    | some cfgFile =>
+        match resolveProfilePatch cfgFile.profiles profileName with
+        | .ok patch => pure patch
+        | .error msg => throw <| IO.userError msg
+    | none => pure default
+  let toolPatch ← match configFile? with
+    | some cfgFile =>
+        match resolveToolPatch cfgFile.tools toolName? with
+        | .ok patch => pure patch
+        | .error msg => throw <| IO.userError msg
+    | none => pure default
+  let mut cfg : ObserveConfig := {}
+  cfg := applyPatch cfg profilePatch
+  cfg := applyPatch cfg toolPatch
+  cfg := applyPatch cfg env.patch
+  cfg := applyPatch cfg cli.patch
+  cfg := finalizeConfig cfg
+  let resolveMeta : ObserveConfigResolveMeta := {
+    configPath? := configPath?
+    profile := profileName
+    tool? := toolName?
+    usedConfig := configFile?.isSome
+    printConfig := cli.printConfig || env.printConfig
+  }
+  return (cfg, resolveMeta)
 
 structure NodeSpan where
   file : String
@@ -1852,7 +2342,10 @@ def registerCollector (c : Collector) : IO Unit :=
 
 @[inline] def runLeanObserveCmd (p : Cli.Parsed) : IO UInt32 := do
   try
-    let cfg := configFromParsed p
+    let (cfg, resolveMeta) ← resolveConfigFromParsed p
+    if resolveMeta.printConfig || resolveMeta.usedConfig then
+      IO.eprintln "leanobserve resolved config:"
+      IO.eprintln <| toString (resolvedConfigToJson cfg resolveMeta)
     let now ← IO.monoMsNow
     let output ← artifactJson cfg (toString now)
     match cfg.out? with
@@ -1860,14 +2353,18 @@ def registerCollector (c : Collector) : IO Unit :=
         IO.FS.writeFile (System.FilePath.mk path) (toString output)
     | none =>
         IO.println (toString output)
-    return 0
+    return (0 : UInt32)
   catch e =>
     IO.eprintln s!"{e}"
-    return 1
+    return (1 : UInt32)
 
 @[inline] def leanObserveCmd : Cmd := `[Cli|
   leanobserve VIA runLeanObserveCmd; ["0.1.0"] "Lean Observatory metrics exporter."
   FLAGS:
+    config : String; "Path to observatory.toml (optional)"
+    profile : String; "Config profile name (default: default)"
+    tool : String; "Tool override name (optional)"
+    "print-config"; "Print resolved config before running"
     root : String; "Project root (default: .)"
     out : String; "Output path (default: stdout)"
     "schema-version" : String; "Schema version (default: 0.1.0)"

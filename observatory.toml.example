@@ -1,0 +1,32 @@
+# Lean Observatory config example
+#
+# Precedence: CLI > env vars > tool overrides > profile > defaults
+#
+# Profiles live under [profile.<name>] and can inherit from one another.
+
+[profile.default]
+root = "."
+schema-version = "0.1.0"
+infotree = true
+infotree-jobs = 4
+command-nodes = true
+report-top = 30
+spans-out = "artifacts/spans.json"
+entries-out = "artifacts/entries.json"
+
+[profile.ci]
+inherits = "default"
+infotree-jobs = 2
+max-files = 200
+report-top = 50
+
+[profile.bench]
+inherits = "default"
+sample = true
+
+[tool.perf]
+perf = "artifacts/perf.txt"
+perf-stat = "artifacts/perf_stat.txt"
+
+[tool.tracy]
+tracy = "artifacts/tracy.csv"
