@@ -29,3 +29,7 @@ root = "Main"
 [[lean_exe]]
 name = "leanobserve"
 root = "LeanObserve.Main"
+
+[[lean_exe]]
+name = "visualizer-gen"
+root = "LeanObserve.VisualizerGen"
