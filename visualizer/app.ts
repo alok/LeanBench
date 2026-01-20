@@ -121,6 +121,21 @@ interface RuntimeFrame {
   memory_bytes?: number;
 }
 
+interface UiSpecOption {
+  key: string;
+  label: string;
+  active?: boolean;
+  color?: string;
+}
+
+interface UiSpec {
+  view_tabs: UiSpecOption[];
+  category_buttons: UiSpecOption[];
+  timeline_color_options: UiSpecOption[];
+  allocs_group_options: UiSpecOption[];
+  alloc_legend: UiSpecOption[];
+}
+
 const fileInput = document.getElementById("fileInput") as HTMLInputElement | null;
 const rootInput = document.getElementById("rootInput") as HTMLInputElement | null;
 const sizeSelect = document.getElementById("sizeSelect") as HTMLSelectElement | null;
@@ -138,7 +153,8 @@ const systemCard = document.getElementById("systemCard") as HTMLDivElement | nul
 const systemInfo = document.getElementById("systemInfo") as HTMLDivElement | null;
 
 // View switching elements
-const viewTabs = document.querySelectorAll(".view-tab");
+const viewTabsContainer = document.getElementById("viewTabs") as HTMLElement | null;
+let viewTabs: HTMLElement[] = [];
 const treemapView = document.getElementById("treemapView") as HTMLElement | null;
 const timelineView = document.getElementById("timelineView") as HTMLElement | null;
 const allocsView = document.getElementById("allocsView") as HTMLElement | null;
@@ -192,6 +208,44 @@ const state: {
   blendScores: null,
   metricCategory: "all",
 };
+
+const defaultUiSpec: UiSpec = {
+  view_tabs: [
+    { key: "treemap", label: "Treemap", active: true },
+    { key: "timeline", label: "Timeline" },
+    { key: "allocs", label: "Allocs" },
+  ],
+  category_buttons: [
+    { key: "all", label: "All", active: true },
+    { key: "compile", label: "Compile" },
+    { key: "runtime", label: "Runtime" },
+  ],
+  timeline_color_options: [
+    { key: "kernel", label: "Kernel Name" },
+    { key: "stream", label: "Stream" },
+    { key: "duration", label: "Duration" },
+  ],
+  allocs_group_options: [
+    { key: "time", label: "Time" },
+    { key: "file", label: "File" },
+    { key: "decl", label: "Declaration" },
+  ],
+  alloc_legend: [
+    { key: "alloc", label: "Alloc", color: "#81c784" },
+    { key: "free", label: "Free", color: "#ef5350" },
+    { key: "realloc", label: "Realloc", color: "#ffb74d" },
+    { key: "transfer_h2d", label: "H2D", color: "#4fc3f7" },
+    { key: "transfer_d2h", label: "D2H", color: "#ba68c8" },
+    { key: "transfer_d2d", label: "D2D", color: "#4db6ac" },
+  ],
+};
+
+applyUiSpec(defaultUiSpec);
+loadUiSpec()
+  .then((spec) => applyUiSpec(spec))
+  .catch((err) => {
+    console.warn("Failed to apply UI spec.", err);
+  });
 
 function collectMetrics(node: NodeData, set: Set<string>): void {
   if (node.metrics) {
@@ -260,6 +314,91 @@ function formatFrequencyMhz(value?: number): string {
 function formatBandwidthGbps(value?: number): string {
   if (value == null || !Number.isFinite(value)) return "n/a";
   return `${value.toFixed(1)} GB/s`;
+}
+
+function buildSelectOptions(select: HTMLSelectElement | null, options: UiSpecOption[]): void {
+  if (!select) return;
+  select.innerHTML = "";
+  options.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.key;
+    option.textContent = opt.label;
+    select.appendChild(option);
+  });
+}
+
+function buildViewTabs(spec: UiSpec): void {
+  if (!viewTabsContainer) return;
+  viewTabsContainer.innerHTML = "";
+  spec.view_tabs.forEach((tab) => {
+    const button = document.createElement("button");
+    button.className = `view-tab${tab.active ? " active" : ""}`;
+    button.dataset.view = tab.key;
+    button.textContent = tab.label;
+    viewTabsContainer.appendChild(button);
+  });
+}
+
+function buildCategoryButtons(spec: UiSpec): void {
+  if (!categoryToggle) return;
+  categoryToggle.innerHTML = "";
+  spec.category_buttons.forEach((btn) => {
+    const button = document.createElement("button");
+    button.className = `category-btn${btn.active ? " active" : ""}`;
+    button.dataset.category = btn.key;
+    button.textContent = btn.label;
+    categoryToggle.appendChild(button);
+  });
+}
+
+function buildAllocLegend(spec: UiSpec): void {
+  if (!allocsLegend) return;
+  allocsLegend.innerHTML = "";
+  spec.alloc_legend.forEach((item) => {
+    const entry = document.createElement("div");
+    entry.className = "legend-item";
+    entry.dataset.event = item.key;
+    const swatch = document.createElement("span");
+    swatch.className = `legend-swatch ${item.key}`;
+    entry.appendChild(swatch);
+    entry.appendChild(document.createTextNode(item.label));
+    allocsLegend.appendChild(entry);
+  });
+}
+
+function applyUiSpec(spec: UiSpec): void {
+  buildViewTabs(spec);
+  buildCategoryButtons(spec);
+  buildSelectOptions(timelineColorBy, spec.timeline_color_options);
+  buildSelectOptions(allocsGroupBy, spec.allocs_group_options);
+  buildAllocLegend(spec);
+
+  const activeView = spec.view_tabs.find((tab) => tab.active)?.key as ViewType | undefined;
+  if (activeView) state.currentView = activeView;
+  const activeCategory = spec.category_buttons.find((btn) => btn.active)?.key as MetricCategory | undefined;
+  if (activeCategory) state.metricCategory = activeCategory;
+
+  wireViewTabs();
+  wireCategoryToggle();
+  switchView(state.currentView);
+
+  if (state.data) {
+    updateMetricSelectors();
+    renderTreemap();
+  }
+}
+
+async function loadUiSpec(): Promise<UiSpec> {
+  const specUrl = new URL("ui-spec.json", window.location.href).toString();
+  try {
+    const resp = await fetch(specUrl);
+    if (!resp.ok) throw new Error(`ui-spec.json fetch failed (${resp.status})`);
+    const parsed = (await resp.json()) as UiSpec;
+    return parsed;
+  } catch (err) {
+    console.warn("Failed to load ui-spec.json, falling back to defaults.", err);
+    return defaultUiSpec;
+  }
 }
 
 /** Get the kind of a metric by key. */
@@ -816,8 +955,8 @@ listSelect?.addEventListener("change", (event) => {
 listCount?.addEventListener("input", () => renderTreemap());
 showLabels?.addEventListener("change", () => renderTreemap());
 
-// Category toggle
-if (categoryToggle) {
+function wireCategoryToggle(): void {
+  if (!categoryToggle) return;
   const categoryButtons = categoryToggle.querySelectorAll(".category-btn");
   categoryButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -847,7 +986,7 @@ function switchView(view: ViewType): void {
 
   // Update tab active state
   viewTabs.forEach((tab) => {
-    const tabView = (tab as HTMLElement).dataset.view;
+    const tabView = tab.dataset.view;
     tab.classList.toggle("active", tabView === view);
   });
 
@@ -873,13 +1012,15 @@ function renderCurrentView(): void {
   }
 }
 
-// Set up tab click handlers
-viewTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    const view = (tab as HTMLElement).dataset.view as ViewType;
-    if (view) switchView(view);
+function wireViewTabs(): void {
+  viewTabs = Array.from(document.querySelectorAll(".view-tab")) as HTMLElement[];
+  viewTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const view = tab.dataset.view as ViewType;
+      if (view) switchView(view);
+    });
   });
-});
+}
 
 // ==================== Timeline View (GPU Gantt Chart) ====================
 

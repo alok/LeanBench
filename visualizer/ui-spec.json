@@ -1,0 +1,23 @@
+{"view_tabs":
+ [{"label": "Treemap", "key": "treemap", "active": true},
+  {"label": "Timeline", "key": "timeline", "active": false},
+  {"label": "Allocs", "key": "allocs", "active": false}],
+ "timeline_color_options":
+ [{"label": "Kernel Name", "key": "kernel"},
+  {"label": "Stream", "key": "stream"},
+  {"label": "Duration", "key": "duration"}],
+ "category_buttons":
+ [{"label": "All", "key": "all", "active": true},
+  {"label": "Compile", "key": "compile", "active": false},
+  {"label": "Runtime", "key": "runtime", "active": false}],
+ "allocs_group_options":
+ [{"label": "Time", "key": "time"},
+  {"label": "File", "key": "file"},
+  {"label": "Declaration", "key": "decl"}],
+ "alloc_legend":
+ [{"label": "Alloc", "key": "alloc", "color": "#81c784"},
+  {"label": "Free", "key": "free", "color": "#ef5350"},
+  {"label": "Realloc", "key": "realloc", "color": "#ffb74d"},
+  {"label": "H2D", "key": "transfer_h2d", "color": "#4fc3f7"},
+  {"label": "D2H", "key": "transfer_d2h", "color": "#ba68c8"},
+  {"label": "D2D", "key": "transfer_d2d", "color": "#4db6ac"}]}

@@ -26,7 +26,8 @@ const detailBody = document.getElementById("detailBody");
 const systemCard = document.getElementById("systemCard");
 const systemInfo = document.getElementById("systemInfo");
 // View switching elements
-const viewTabs = document.querySelectorAll(".view-tab");
+const viewTabsContainer = document.getElementById("viewTabs");
+let viewTabs = [];
 const treemapView = document.getElementById("treemapView");
 const timelineView = document.getElementById("timelineView");
 const allocsView = document.getElementById("allocsView");
@@ -59,6 +60,42 @@ const state = {
     blendScores: null,
     metricCategory: "all",
 };
+const defaultUiSpec = {
+    view_tabs: [
+        { key: "treemap", label: "Treemap", active: true },
+        { key: "timeline", label: "Timeline" },
+        { key: "allocs", label: "Allocs" },
+    ],
+    category_buttons: [
+        { key: "all", label: "All", active: true },
+        { key: "compile", label: "Compile" },
+        { key: "runtime", label: "Runtime" },
+    ],
+    timeline_color_options: [
+        { key: "kernel", label: "Kernel Name" },
+        { key: "stream", label: "Stream" },
+        { key: "duration", label: "Duration" },
+    ],
+    allocs_group_options: [
+        { key: "time", label: "Time" },
+        { key: "file", label: "File" },
+        { key: "decl", label: "Declaration" },
+    ],
+    alloc_legend: [
+        { key: "alloc", label: "Alloc", color: "#81c784" },
+        { key: "free", label: "Free", color: "#ef5350" },
+        { key: "realloc", label: "Realloc", color: "#ffb74d" },
+        { key: "transfer_h2d", label: "H2D", color: "#4fc3f7" },
+        { key: "transfer_d2h", label: "D2H", color: "#ba68c8" },
+        { key: "transfer_d2d", label: "D2D", color: "#4db6ac" },
+    ],
+};
+applyUiSpec(defaultUiSpec);
+loadUiSpec()
+    .then((spec) => applyUiSpec(spec))
+    .catch((err) => {
+    console.warn("Failed to apply UI spec.", err);
+});
 function collectMetrics(node, set) {
     if (node.metrics) {
         Object.keys(node.metrics).forEach((k) => set.add(k));
@@ -131,6 +168,90 @@ function formatBandwidthGbps(value) {
     if (value == null || !Number.isFinite(value))
         return "n/a";
     return `${value.toFixed(1)} GB/s`;
+}
+function buildSelectOptions(select, options) {
+    if (!select)
+        return;
+    select.innerHTML = "";
+    options.forEach((opt) => {
+        const option = document.createElement("option");
+        option.value = opt.key;
+        option.textContent = opt.label;
+        select.appendChild(option);
+    });
+}
+function buildViewTabs(spec) {
+    if (!viewTabsContainer)
+        return;
+    viewTabsContainer.innerHTML = "";
+    spec.view_tabs.forEach((tab) => {
+        const button = document.createElement("button");
+        button.className = `view-tab${tab.active ? " active" : ""}`;
+        button.dataset.view = tab.key;
+        button.textContent = tab.label;
+        viewTabsContainer.appendChild(button);
+    });
+}
+function buildCategoryButtons(spec) {
+    if (!categoryToggle)
+        return;
+    categoryToggle.innerHTML = "";
+    spec.category_buttons.forEach((btn) => {
+        const button = document.createElement("button");
+        button.className = `category-btn${btn.active ? " active" : ""}`;
+        button.dataset.category = btn.key;
+        button.textContent = btn.label;
+        categoryToggle.appendChild(button);
+    });
+}
+function buildAllocLegend(spec) {
+    if (!allocsLegend)
+        return;
+    allocsLegend.innerHTML = "";
+    spec.alloc_legend.forEach((item) => {
+        const entry = document.createElement("div");
+        entry.className = "legend-item";
+        entry.dataset.event = item.key;
+        const swatch = document.createElement("span");
+        swatch.className = `legend-swatch ${item.key}`;
+        entry.appendChild(swatch);
+        entry.appendChild(document.createTextNode(item.label));
+        allocsLegend.appendChild(entry);
+    });
+}
+function applyUiSpec(spec) {
+    buildViewTabs(spec);
+    buildCategoryButtons(spec);
+    buildSelectOptions(timelineColorBy, spec.timeline_color_options);
+    buildSelectOptions(allocsGroupBy, spec.allocs_group_options);
+    buildAllocLegend(spec);
+    const activeView = spec.view_tabs.find((tab) => tab.active)?.key;
+    if (activeView)
+        state.currentView = activeView;
+    const activeCategory = spec.category_buttons.find((btn) => btn.active)?.key;
+    if (activeCategory)
+        state.metricCategory = activeCategory;
+    wireViewTabs();
+    wireCategoryToggle();
+    switchView(state.currentView);
+    if (state.data) {
+        updateMetricSelectors();
+        renderTreemap();
+    }
+}
+async function loadUiSpec() {
+    const specUrl = new URL("ui-spec.json", window.location.href).toString();
+    try {
+        const resp = await fetch(specUrl);
+        if (!resp.ok)
+            throw new Error(`ui-spec.json fetch failed (${resp.status})`);
+        const parsed = (await resp.json());
+        return parsed;
+    }
+    catch (err) {
+        console.warn("Failed to load ui-spec.json, falling back to defaults.", err);
+        return defaultUiSpec;
+    }
 }
 /** Get the kind of a metric by key. */
 function getMetricKind(key) {
@@ -664,8 +785,9 @@ listSelect?.addEventListener("change", (event) => {
 });
 listCount?.addEventListener("input", () => renderTreemap());
 showLabels?.addEventListener("change", () => renderTreemap());
-// Category toggle
-if (categoryToggle) {
+function wireCategoryToggle() {
+    if (!categoryToggle)
+        return;
     const categoryButtons = categoryToggle.querySelectorAll(".category-btn");
     categoryButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -717,14 +839,16 @@ function renderCurrentView() {
             break;
     }
 }
-// Set up tab click handlers
-viewTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-        const view = tab.dataset.view;
-        if (view)
-            switchView(view);
+function wireViewTabs() {
+    viewTabs = Array.from(document.querySelectorAll(".view-tab"));
+    viewTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+            const view = tab.dataset.view;
+            if (view)
+                switchView(view);
+        });
     });
-});
+}
 // ==================== Timeline View (GPU Gantt Chart) ====================
 function renderTimeline() {
     if (!state.data || !timelineEl)

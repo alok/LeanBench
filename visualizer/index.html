@@ -15,11 +15,7 @@
       <div class="brand">
         <div class="badge">Lean Observatory</div>
         <div class="title">Metrics Explorer</div>
-        <nav class="view-tabs">
-          <button class="view-tab active" data-view="treemap">Treemap</button>
-          <button class="view-tab" data-view="timeline">Timeline</button>
-          <button class="view-tab" data-view="allocs">Allocs</button>
-        </nav>
+        <nav class="view-tabs" id="viewTabs"></nav>
       </div>
       <div class="controls">
         <label class="control">
@@ -32,11 +28,7 @@
         </label>
         <div class="control">
           <span>Metric Category</span>
-          <div class="category-toggle" id="categoryToggle">
-            <button class="category-btn active" data-category="all">All</button>
-            <button class="category-btn" data-category="compile">Compile</button>
-            <button class="category-btn" data-category="runtime">Runtime</button>
-          </div>
+          <div class="category-toggle" id="categoryToggle"></div>
         </div>
         <label class="control">
           <span>Size Metric</span>
@@ -71,11 +63,7 @@
           <div class="timeline-controls">
             <label class="control">
               <span>Color By</span>
-              <select id="timelineColorBy">
-                <option value="kernel">Kernel Name</option>
-                <option value="stream">Stream</option>
-                <option value="duration">Duration</option>
-              </select>
+              <select id="timelineColorBy"></select>
             </label>
           </div>
         </div>
@@ -89,38 +77,9 @@
           <div class="allocs-controls">
             <label class="control">
               <span>Group By</span>
-              <select id="allocsGroupBy">
-                <option value="time">Time</option>
-                <option value="file">File</option>
-                <option value="decl">Declaration</option>
-              </select>
+              <select id="allocsGroupBy"></select>
             </label>
-            <div class="allocs-legend" id="allocsLegend">
-              <div class="legend-item" data-event="alloc">
-                <span class="legend-swatch alloc"></span>
-                Alloc
-              </div>
-              <div class="legend-item" data-event="free">
-                <span class="legend-swatch free"></span>
-                Free
-              </div>
-              <div class="legend-item" data-event="realloc">
-                <span class="legend-swatch realloc"></span>
-                Realloc
-              </div>
-              <div class="legend-item" data-event="transfer_h2d">
-                <span class="legend-swatch transfer_h2d"></span>
-                H2D
-              </div>
-              <div class="legend-item" data-event="transfer_d2h">
-                <span class="legend-swatch transfer_d2h"></span>
-                D2H
-              </div>
-              <div class="legend-item" data-event="transfer_d2d">
-                <span class="legend-swatch transfer_d2d"></span>
-                D2D
-              </div>
-            </div>
+            <div class="allocs-legend" id="allocsLegend"></div>
           </div>
         </div>
         <div id="allocs"></div>
