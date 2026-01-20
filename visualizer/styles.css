@@ -425,6 +425,31 @@ body {
   gap: 12px;
 }
 
+.allocs-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
 #timeline,
 #allocs {
   background: var(--panel);
@@ -471,11 +496,44 @@ body {
   fill: #ef5350;
 }
 
-.alloc-event.realloc,
-.alloc-event.transfer_h2d,
-.alloc-event.transfer_d2h,
+.alloc-event.realloc {
+  fill: #ffb74d;
+}
+
+.alloc-event.transfer_h2d {
+  fill: #4fc3f7;
+}
+
+.alloc-event.transfer_d2h {
+  fill: #ba68c8;
+}
+
 .alloc-event.transfer_d2d {
-  fill: #ffd166;
+  fill: #4db6ac;
+}
+
+.legend-swatch.alloc {
+  background: #81c784;
+}
+
+.legend-swatch.free {
+  background: #ef5350;
+}
+
+.legend-swatch.realloc {
+  background: #ffb74d;
+}
+
+.legend-swatch.transfer_h2d {
+  background: #4fc3f7;
+}
+
+.legend-swatch.transfer_d2h {
+  background: #ba68c8;
+}
+
+.legend-swatch.transfer_d2d {
+  background: #4db6ac;
 }
 
 /* Optgroup styling for metric selectors */

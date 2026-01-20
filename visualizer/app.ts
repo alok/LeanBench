@@ -145,6 +145,7 @@ const allocsView = document.getElementById("allocsView") as HTMLElement | null;
 const timelineEl = document.getElementById("timeline") as HTMLDivElement | null;
 const allocsEl = document.getElementById("allocs") as HTMLDivElement | null;
 const allocsTitle = document.getElementById("allocsTitle") as HTMLHeadingElement | null;
+const allocsLegend = document.getElementById("allocsLegend") as HTMLDivElement | null;
 const timelineColorBy = document.getElementById("timelineColorBy") as HTMLSelectElement | null;
 const allocsGroupBy = document.getElementById("allocsGroupBy") as HTMLSelectElement | null;
 
@@ -999,6 +1000,15 @@ function renderAllocs(): void {
   const usingGpuEvents = cpuEvents.length === 0 && gpuEvents.length > 0;
   if (allocsTitle) {
     allocsTitle.textContent = usingGpuEvents ? "GPU Memory Allocations" : "Memory Allocations";
+  }
+  if (allocsLegend) {
+    const eventTypes = new Set(events.map((e) => e.type));
+    allocsLegend.hidden = events.length === 0;
+    allocsLegend.querySelectorAll<HTMLElement>(".legend-item").forEach((item) => {
+      const type = item.dataset.event as MemoryEventType | undefined;
+      if (!type) return;
+      item.hidden = !eventTypes.has(type);
+    });
   }
   if (events.length === 0) {
     allocsEl.innerHTML = `

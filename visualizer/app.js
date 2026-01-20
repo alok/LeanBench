@@ -33,6 +33,7 @@ const allocsView = document.getElementById("allocsView");
 const timelineEl = document.getElementById("timeline");
 const allocsEl = document.getElementById("allocs");
 const allocsTitle = document.getElementById("allocsTitle");
+const allocsLegend = document.getElementById("allocsLegend");
 const timelineColorBy = document.getElementById("timelineColorBy");
 const allocsGroupBy = document.getElementById("allocsGroupBy");
 const BLEND_KEY = "__blend__";
@@ -829,6 +830,16 @@ function renderAllocs() {
     const usingGpuEvents = cpuEvents.length === 0 && gpuEvents.length > 0;
     if (allocsTitle) {
         allocsTitle.textContent = usingGpuEvents ? "GPU Memory Allocations" : "Memory Allocations";
+    }
+    if (allocsLegend) {
+        const eventTypes = new Set(events.map((e) => e.type));
+        allocsLegend.hidden = events.length === 0;
+        allocsLegend.querySelectorAll(".legend-item").forEach((item) => {
+            const type = item.dataset.event;
+            if (!type)
+                return;
+            item.hidden = !eventTypes.has(type);
+        });
     }
     if (events.length === 0) {
         allocsEl.innerHTML = `
