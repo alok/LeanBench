@@ -35,12 +35,7 @@
       <section class="canvas view-container" id="timelineView" hidden>
         <div class="timeline-header">
           <h3>GPU Kernel Timeline</h3>
-          <div class="timeline-controls">
-            <label class="control">
-              <span>Color By</span>
-              <select id="timelineColorBy"></select>
-            </label>
-          </div>
+          <div class="timeline-controls" id="timelineControls"></div>
         </div>
         <div id="timeline"></div>
       </section>
@@ -50,10 +45,7 @@
         <div class="allocs-header">
           <h3 id="allocsTitle">Memory Allocations</h3>
           <div class="allocs-controls">
-            <label class="control">
-              <span>Group By</span>
-              <select id="allocsGroupBy"></select>
-            </label>
+            <div class="allocs-controls-main" id="allocsControls"></div>
             <div class="allocs-legend" id="allocsLegend"></div>
           </div>
         </div>
@@ -62,16 +54,7 @@
       <aside class="inspector">
         <div class="inspector-card">
           <div class="inspector-title">Top Nodes</div>
-          <div class="inspector-controls">
-            <label class="control">
-              <span>List Metric</span>
-              <select id="listSelect"></select>
-            </label>
-            <label class="control">
-              <span>Count</span>
-              <input id="listCount" type="number" min="5" max="200" value="30" />
-            </label>
-          </div>
+          <div class="inspector-controls" id="inspectorControls"></div>
           <div id="topList" class="top-list"></div>
         </div>
         <div class="inspector-card">

@@ -128,15 +128,21 @@ interface UiSpecOption {
   color?: string;
 }
 
-type UiControlKind = "file" | "text" | "button-group" | "select" | "toggle";
+type UiControlKind = "file" | "text" | "button-group" | "select" | "toggle" | "number";
+type UiControlSection = "topbar" | "timeline" | "allocs" | "inspector";
 
 interface UiControlSpec {
   id: string;
   label: string;
+  section?: UiControlSection;
   kind: UiControlKind;
   placeholder?: string;
   accept?: string;
   checked?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  value?: number;
 }
 
 interface UiSpec {
@@ -150,12 +156,15 @@ interface UiSpec {
 }
 
 const controlsRoot = document.getElementById("controls") as HTMLDivElement | null;
+const timelineControlsRoot = document.getElementById("timelineControls") as HTMLDivElement | null;
+const allocsControlsRoot = document.getElementById("allocsControls") as HTMLDivElement | null;
+const inspectorControlsRoot = document.getElementById("inspectorControls") as HTMLDivElement | null;
 let fileInput: HTMLInputElement | null = null;
 let rootInput: HTMLInputElement | null = null;
 let sizeSelect: HTMLSelectElement | null = null;
 let colorSelect: HTMLSelectElement | null = null;
-const listSelect = document.getElementById("listSelect") as HTMLSelectElement | null;
-const listCount = document.getElementById("listCount") as HTMLInputElement | null;
+let listSelect: HTMLSelectElement | null = null;
+let listCount: HTMLInputElement | null = null;
 let showLabels: HTMLInputElement | null = null;
 const tooltip = document.getElementById("tooltip") as HTMLDivElement | null;
 const treemapEl = document.getElementById("treemap") as HTMLDivElement | null;
@@ -176,8 +185,8 @@ const timelineEl = document.getElementById("timeline") as HTMLDivElement | null;
 const allocsEl = document.getElementById("allocs") as HTMLDivElement | null;
 const allocsTitle = document.getElementById("allocsTitle") as HTMLHeadingElement | null;
 const allocsLegend = document.getElementById("allocsLegend") as HTMLDivElement | null;
-const timelineColorBy = document.getElementById("timelineColorBy") as HTMLSelectElement | null;
-const allocsGroupBy = document.getElementById("allocsGroupBy") as HTMLSelectElement | null;
+let timelineColorBy: HTMLSelectElement | null = null;
+let allocsGroupBy: HTMLSelectElement | null = null;
 
 const BLEND_KEY = "__blend__";
 
@@ -232,12 +241,22 @@ const defaultUiSpec: UiSpec = {
     { key: "other", label: "Other", order: 99, category: "all" },
   ],
   controls: [
-    { id: "fileInput", label: "Metrics JSON", kind: "file", accept: "application/json" },
-    { id: "rootInput", label: "Root Path (for editor links)", kind: "text", placeholder: "/abs/path/to/project" },
-    { id: "categoryToggle", label: "Metric Category", kind: "button-group" },
-    { id: "sizeSelect", label: "Size Metric", kind: "select" },
-    { id: "colorSelect", label: "Color Metric", kind: "select" },
-    { id: "showLabels", label: "Show labels", kind: "toggle" },
+    { id: "fileInput", label: "Metrics JSON", section: "topbar", kind: "file", accept: "application/json" },
+    {
+      id: "rootInput",
+      label: "Root Path (for editor links)",
+      section: "topbar",
+      kind: "text",
+      placeholder: "/abs/path/to/project",
+    },
+    { id: "categoryToggle", label: "Metric Category", section: "topbar", kind: "button-group" },
+    { id: "sizeSelect", label: "Size Metric", section: "topbar", kind: "select" },
+    { id: "colorSelect", label: "Color Metric", section: "topbar", kind: "select" },
+    { id: "showLabels", label: "Show labels", section: "topbar", kind: "toggle" },
+    { id: "timelineColorBy", label: "Color By", section: "timeline", kind: "select" },
+    { id: "allocsGroupBy", label: "Group By", section: "allocs", kind: "select" },
+    { id: "listSelect", label: "List Metric", section: "inspector", kind: "select" },
+    { id: "listCount", label: "Count", section: "inspector", kind: "number", min: 5, max: 200, value: 30 },
   ],
   view_tabs: [
     { key: "treemap", label: "Treemap", active: true },
@@ -378,10 +397,17 @@ function resolveUiSpec(spec: UiSpec): UiSpec {
   };
 }
 
-function buildControls(spec: UiSpec): void {
-  if (!controlsRoot) return;
-  controlsRoot.innerHTML = "";
-  spec.controls.forEach((control) => {
+function controlsForSection(spec: UiSpec, section: UiControlSection): UiControlSpec[] {
+  return (spec.controls || []).filter((control) => {
+    const target = control.section || "topbar";
+    return target === section;
+  });
+}
+
+function buildControls(root: HTMLElement | null, controls: UiControlSpec[]): void {
+  if (!root) return;
+  root.innerHTML = "";
+  controls.forEach((control) => {
     const wrapper = document.createElement("label");
 
     if (control.kind === "toggle") {
@@ -394,7 +420,7 @@ function buildControls(spec: UiSpec): void {
       const label = document.createElement("span");
       label.textContent = control.label;
       wrapper.appendChild(label);
-      controlsRoot.appendChild(wrapper);
+      root.appendChild(wrapper);
       return;
     }
 
@@ -426,6 +452,17 @@ function buildControls(spec: UiSpec): void {
         wrapper.appendChild(select);
         break;
       }
+      case "number": {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.id = control.id;
+        if (typeof control.min === "number") input.min = String(control.min);
+        if (typeof control.max === "number") input.max = String(control.max);
+        if (typeof control.step === "number") input.step = String(control.step);
+        if (typeof control.value === "number") input.value = String(control.value);
+        wrapper.appendChild(input);
+        break;
+      }
       case "button-group": {
         const group = document.createElement("div");
         group.className = "category-toggle";
@@ -437,7 +474,7 @@ function buildControls(spec: UiSpec): void {
         break;
     }
 
-    controlsRoot.appendChild(wrapper);
+    root.appendChild(wrapper);
   });
 }
 
@@ -446,8 +483,12 @@ function refreshControlHandles(): void {
   rootInput = document.getElementById("rootInput") as HTMLInputElement | null;
   sizeSelect = document.getElementById("sizeSelect") as HTMLSelectElement | null;
   colorSelect = document.getElementById("colorSelect") as HTMLSelectElement | null;
+  listSelect = document.getElementById("listSelect") as HTMLSelectElement | null;
+  listCount = document.getElementById("listCount") as HTMLInputElement | null;
   showLabels = document.getElementById("showLabels") as HTMLInputElement | null;
   categoryToggle = document.getElementById("categoryToggle") as HTMLDivElement | null;
+  timelineColorBy = document.getElementById("timelineColorBy") as HTMLSelectElement | null;
+  allocsGroupBy = document.getElementById("allocsGroupBy") as HTMLSelectElement | null;
 }
 
 function wireControlHandlers(): void {
@@ -485,7 +526,19 @@ function wireControlHandlers(): void {
     renderTreemap();
   });
 
+  listSelect?.addEventListener("change", (event) => {
+    const target = event.target as HTMLSelectElement;
+    state.listKey = target.value;
+    renderBlendPanel();
+    renderTreemap();
+  });
+
+  listCount?.addEventListener("input", () => renderTreemap());
+
   showLabels?.addEventListener("change", () => renderTreemap());
+
+  timelineColorBy?.addEventListener("change", () => renderTimeline());
+  allocsGroupBy?.addEventListener("change", () => renderAllocs());
 }
 
 function buildViewTabs(spec: UiSpec): void {
@@ -542,7 +595,10 @@ function applyUiSpec(spec: UiSpec): void {
 
   applyMetricGroups(resolved.metric_groups);
   buildViewTabs(resolved);
-  buildControls(resolved);
+  buildControls(controlsRoot, controlsForSection(resolved, "topbar"));
+  buildControls(timelineControlsRoot, controlsForSection(resolved, "timeline"));
+  buildControls(allocsControlsRoot, controlsForSection(resolved, "allocs"));
+  buildControls(inspectorControlsRoot, controlsForSection(resolved, "inspector"));
   refreshControlHandles();
   buildCategoryButtons(resolved);
   buildSelectOptions(timelineColorBy, resolved.timeline_color_options);
@@ -1089,14 +1145,6 @@ if (initialDataUrl) {
   });
 }
 
-listSelect?.addEventListener("change", (event) => {
-  const target = event.target as HTMLSelectElement;
-  state.listKey = target.value;
-  renderBlendPanel();
-  renderTreemap();
-});
-
-listCount?.addEventListener("input", () => renderTreemap());
 
 function wireCategoryToggle(): void {
   const toggle = categoryToggle;
@@ -1564,5 +1612,3 @@ function showAllocTooltip(event: MouseEvent, data: { event: MemoryEvent; balance
 }
 
 // Set up Timeline/Allocs control event handlers
-timelineColorBy?.addEventListener("change", () => renderTimeline());
-allocsGroupBy?.addEventListener("change", () => renderAllocs());

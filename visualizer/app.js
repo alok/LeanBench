@@ -2,12 +2,15 @@
 /** Metric group metadata for organizing selectors. */
 let metricGroups = {};
 const controlsRoot = document.getElementById("controls");
+const timelineControlsRoot = document.getElementById("timelineControls");
+const allocsControlsRoot = document.getElementById("allocsControls");
+const inspectorControlsRoot = document.getElementById("inspectorControls");
 let fileInput = null;
 let rootInput = null;
 let sizeSelect = null;
 let colorSelect = null;
-const listSelect = document.getElementById("listSelect");
-const listCount = document.getElementById("listCount");
+let listSelect = null;
+let listCount = null;
 let showLabels = null;
 const tooltip = document.getElementById("tooltip");
 const treemapEl = document.getElementById("treemap");
@@ -27,8 +30,8 @@ const timelineEl = document.getElementById("timeline");
 const allocsEl = document.getElementById("allocs");
 const allocsTitle = document.getElementById("allocsTitle");
 const allocsLegend = document.getElementById("allocsLegend");
-const timelineColorBy = document.getElementById("timelineColorBy");
-const allocsGroupBy = document.getElementById("allocsGroupBy");
+let timelineColorBy = null;
+let allocsGroupBy = null;
 const BLEND_KEY = "__blend__";
 let categoryToggle = null;
 const urlParams = new URLSearchParams(window.location.search);
@@ -62,12 +65,22 @@ const defaultUiSpec = {
         { key: "other", label: "Other", order: 99, category: "all" },
     ],
     controls: [
-        { id: "fileInput", label: "Metrics JSON", kind: "file", accept: "application/json" },
-        { id: "rootInput", label: "Root Path (for editor links)", kind: "text", placeholder: "/abs/path/to/project" },
-        { id: "categoryToggle", label: "Metric Category", kind: "button-group" },
-        { id: "sizeSelect", label: "Size Metric", kind: "select" },
-        { id: "colorSelect", label: "Color Metric", kind: "select" },
-        { id: "showLabels", label: "Show labels", kind: "toggle" },
+        { id: "fileInput", label: "Metrics JSON", section: "topbar", kind: "file", accept: "application/json" },
+        {
+            id: "rootInput",
+            label: "Root Path (for editor links)",
+            section: "topbar",
+            kind: "text",
+            placeholder: "/abs/path/to/project",
+        },
+        { id: "categoryToggle", label: "Metric Category", section: "topbar", kind: "button-group" },
+        { id: "sizeSelect", label: "Size Metric", section: "topbar", kind: "select" },
+        { id: "colorSelect", label: "Color Metric", section: "topbar", kind: "select" },
+        { id: "showLabels", label: "Show labels", section: "topbar", kind: "toggle" },
+        { id: "timelineColorBy", label: "Color By", section: "timeline", kind: "select" },
+        { id: "allocsGroupBy", label: "Group By", section: "allocs", kind: "select" },
+        { id: "listSelect", label: "List Metric", section: "inspector", kind: "select" },
+        { id: "listCount", label: "Count", section: "inspector", kind: "number", min: 5, max: 200, value: 30 },
     ],
     view_tabs: [
         { key: "treemap", label: "Treemap", active: true },
@@ -205,11 +218,17 @@ function resolveUiSpec(spec) {
         alloc_legend: Array.isArray(spec.alloc_legend) && spec.alloc_legend.length ? spec.alloc_legend : defaultUiSpec.alloc_legend,
     };
 }
-function buildControls(spec) {
-    if (!controlsRoot)
+function controlsForSection(spec, section) {
+    return (spec.controls || []).filter((control) => {
+        const target = control.section || "topbar";
+        return target === section;
+    });
+}
+function buildControls(root, controls) {
+    if (!root)
         return;
-    controlsRoot.innerHTML = "";
-    spec.controls.forEach((control) => {
+    root.innerHTML = "";
+    controls.forEach((control) => {
         const wrapper = document.createElement("label");
         if (control.kind === "toggle") {
             wrapper.className = "control toggle";
@@ -222,7 +241,7 @@ function buildControls(spec) {
             const label = document.createElement("span");
             label.textContent = control.label;
             wrapper.appendChild(label);
-            controlsRoot.appendChild(wrapper);
+            root.appendChild(wrapper);
             return;
         }
         wrapper.className = "control";
@@ -254,6 +273,21 @@ function buildControls(spec) {
                 wrapper.appendChild(select);
                 break;
             }
+            case "number": {
+                const input = document.createElement("input");
+                input.type = "number";
+                input.id = control.id;
+                if (typeof control.min === "number")
+                    input.min = String(control.min);
+                if (typeof control.max === "number")
+                    input.max = String(control.max);
+                if (typeof control.step === "number")
+                    input.step = String(control.step);
+                if (typeof control.value === "number")
+                    input.value = String(control.value);
+                wrapper.appendChild(input);
+                break;
+            }
             case "button-group": {
                 const group = document.createElement("div");
                 group.className = "category-toggle";
@@ -264,7 +298,7 @@ function buildControls(spec) {
             default:
                 break;
         }
-        controlsRoot.appendChild(wrapper);
+        root.appendChild(wrapper);
     });
 }
 function refreshControlHandles() {
@@ -272,8 +306,12 @@ function refreshControlHandles() {
     rootInput = document.getElementById("rootInput");
     sizeSelect = document.getElementById("sizeSelect");
     colorSelect = document.getElementById("colorSelect");
+    listSelect = document.getElementById("listSelect");
+    listCount = document.getElementById("listCount");
     showLabels = document.getElementById("showLabels");
     categoryToggle = document.getElementById("categoryToggle");
+    timelineColorBy = document.getElementById("timelineColorBy");
+    allocsGroupBy = document.getElementById("allocsGroupBy");
 }
 function wireControlHandlers() {
     fileInput?.addEventListener("change", async (event) => {
@@ -308,7 +346,16 @@ function wireControlHandlers() {
         renderBlendPanel();
         renderTreemap();
     });
+    listSelect?.addEventListener("change", (event) => {
+        const target = event.target;
+        state.listKey = target.value;
+        renderBlendPanel();
+        renderTreemap();
+    });
+    listCount?.addEventListener("input", () => renderTreemap());
     showLabels?.addEventListener("change", () => renderTreemap());
+    timelineColorBy?.addEventListener("change", () => renderTimeline());
+    allocsGroupBy?.addEventListener("change", () => renderAllocs());
 }
 function buildViewTabs(spec) {
     if (!viewTabsContainer)
@@ -362,7 +409,10 @@ function applyUiSpec(spec) {
     const prevShowLabels = showLabels?.checked;
     applyMetricGroups(resolved.metric_groups);
     buildViewTabs(resolved);
-    buildControls(resolved);
+    buildControls(controlsRoot, controlsForSection(resolved, "topbar"));
+    buildControls(timelineControlsRoot, controlsForSection(resolved, "timeline"));
+    buildControls(allocsControlsRoot, controlsForSection(resolved, "allocs"));
+    buildControls(inspectorControlsRoot, controlsForSection(resolved, "inspector"));
     refreshControlHandles();
     buildCategoryButtons(resolved);
     buildSelectOptions(timelineColorBy, resolved.timeline_color_options);
@@ -894,13 +944,6 @@ if (initialDataUrl) {
         console.error(err);
     });
 }
-listSelect?.addEventListener("change", (event) => {
-    const target = event.target;
-    state.listKey = target.value;
-    renderBlendPanel();
-    renderTreemap();
-});
-listCount?.addEventListener("input", () => renderTreemap());
 function wireCategoryToggle() {
     const toggle = categoryToggle;
     if (!toggle)
@@ -1319,5 +1362,3 @@ function showAllocTooltip(event, data) {
     tooltip.style.top = `${event.clientY + 12}px`;
 }
 // Set up Timeline/Allocs control event handlers
-timelineColorBy?.addEventListener("change", () => renderTimeline());
-allocsGroupBy?.addEventListener("change", () => renderAllocs());
