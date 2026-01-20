@@ -822,7 +822,7 @@ function renderAllocs() {
     allocsEl.innerHTML = "";
     const width = allocsEl.clientWidth;
     const height = allocsEl.clientHeight || 500;
-    const margin = { top: 40, right: 30, bottom: 50, left: 80 };
+    const margin = { top: 40, right: 30, bottom: 70, left: 90 };
     // Get memory events from data
     const cpuEvents = state.data.memory_events || [];
     const gpuEvents = state.data.gpu_memory_events || [];
@@ -847,6 +847,128 @@ function renderAllocs() {
         <p>No memory event data available. Import a trace with memory_events or gpu_memory_events in your JSON.</p>
       </div>
     `;
+        return;
+    }
+    const groupBy = allocsGroupBy?.value || "time";
+    if (groupBy !== "time") {
+        const groupKey = (e) => {
+            if (groupBy === "file")
+                return e.file || "(unknown file)";
+            if (groupBy === "decl")
+                return e.lean_decl || "(unknown decl)";
+            return "(unknown)";
+        };
+        const grouped = new Map();
+        events.forEach((e) => {
+            const key = groupKey(e);
+            const entry = grouped.get(key) || {
+                key,
+                totals: {
+                    alloc: 0,
+                    free: 0,
+                    realloc: 0,
+                    transfer_h2d: 0,
+                    transfer_d2h: 0,
+                    transfer_d2d: 0,
+                },
+                events: [],
+            };
+            entry.totals[e.type] = (entry.totals[e.type] || 0) + e.bytes;
+            entry.events.push(e);
+            grouped.set(key, entry);
+        });
+        const entries = Array.from(grouped.values()).map((entry) => {
+            const totalBytes = Object.values(entry.totals).reduce((sum, v) => sum + v, 0);
+            return { ...entry, totalBytes };
+        });
+        entries.sort((a, b) => b.totalBytes - a.totalBytes);
+        const maxGroups = 40;
+        const trimmed = entries.slice(0, maxGroups);
+        const maxValue = Math.max(...trimmed.map((e) => e.totalBytes));
+        const safeMax = maxValue === 0 ? 1 : maxValue;
+        const xScale = d3
+            .scaleBand()
+            .domain(trimmed.map((d) => d.key))
+            .range([margin.left, width - margin.right])
+            .padding(0.2);
+        const yScale = d3
+            .scaleLinear()
+            .domain([0, safeMax])
+            .range([height - margin.bottom, margin.top]);
+        const svg = d3
+            .select(allocsEl)
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+        const formatLabel = (label) => {
+            if (label.length <= 16)
+                return label;
+            return `${label.slice(0, 13)}...`;
+        };
+        svg
+            .append("g")
+            .attr("transform", `translate(0,${height - margin.bottom})`)
+            .call(d3
+            .axisBottom(xScale)
+            .tickFormat((d) => formatLabel(d))
+            .tickSizeOuter(0))
+            .selectAll("text")
+            .style("text-anchor", "end")
+            .attr("dx", "-0.6em")
+            .attr("dy", "0.3em")
+            .attr("transform", "rotate(-35)");
+        svg
+            .append("g")
+            .attr("transform", `translate(${margin.left},0)`)
+            .call(d3.axisLeft(yScale).ticks(6).tickFormat((d) => formatValue(d, "bytes")));
+        svg
+            .selectAll(".alloc-bar")
+            .data(trimmed)
+            .enter()
+            .append("rect")
+            .attr("class", "alloc-bar")
+            .attr("x", (d) => xScale(d.key) || 0)
+            .attr("y", (d) => yScale(d.totalBytes))
+            .attr("width", xScale.bandwidth())
+            .attr("height", (d) => yScale(0) - yScale(d.totalBytes))
+            .attr("fill", usingGpuEvents ? "#4fc3f7" : "#4bd5ff")
+            .attr("opacity", 0.85)
+            .on("mousemove", (event, d) => {
+            if (!tooltip)
+                return;
+            const parts = [];
+            const order = [
+                "alloc",
+                "free",
+                "realloc",
+                "transfer_h2d",
+                "transfer_d2h",
+                "transfer_d2d",
+            ];
+            order.forEach((type) => {
+                const value = d.totals[type];
+                if (value > 0)
+                    parts.push(`<div>${type.replace(/_/g, " ")}: ${formatValue(value, "bytes")}</div>`);
+            });
+            tooltip.innerHTML = `
+          <div><strong>${d.key}</strong></div>
+          <div>Total: ${formatValue(d.totalBytes, "bytes")}</div>
+          ${parts.join("")}
+        `;
+            tooltip.hidden = false;
+            tooltip.style.left = `${event.clientX + 12}px`;
+            tooltip.style.top = `${event.clientY + 12}px`;
+        })
+            .on("mouseleave", hideTooltip);
+        if (entries.length > maxGroups) {
+            svg
+                .append("text")
+                .attr("x", margin.left)
+                .attr("y", margin.top - 12)
+                .attr("fill", "currentColor")
+                .attr("font-size", "11px")
+                .text(`Showing top ${maxGroups} ${groupBy} groups by total bytes`);
+        }
         return;
     }
     // Calculate running balance over time
