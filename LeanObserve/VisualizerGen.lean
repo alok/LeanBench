@@ -37,6 +37,23 @@ def categoryButtons : Array CategoryButton :=
    , { key := "runtime", label := "Runtime" }
    ]
 
+structure MetricGroup where
+  key : String
+  label : String
+  order : Nat
+  category : String
+
+def metricGroups : Array MetricGroup :=
+  #[ { key := "textscan", label := "Compile-time (Text)", order := 0, category := "compile" }
+   , { key := "infotree", label := "Compile-time (Semantic)", order := 1, category := "compile" }
+   , { key := "profiler", label := "Compile-time (Profiler)", order := 2, category := "compile" }
+   , { key := "cpu", label := "Runtime: CPU", order := 3, category := "runtime" }
+   , { key := "gpu", label := "Runtime: GPU", order := 4, category := "runtime" }
+   , { key := "memory", label := "Runtime: Memory", order := 5, category := "runtime" }
+   , { key := "ffi", label := "Runtime: FFI", order := 6, category := "runtime" }
+   , { key := "other", label := "Other", order := 99, category := "all" }
+   ]
+
 def timelineColorOptions : Array (String × String) :=
   #[ ("kernel", "Kernel Name")
    , ("stream", "Stream")
@@ -878,9 +895,18 @@ def optionToJson (opt : String × String) : Lean.Json :=
     , ("label", Lean.Json.str opt.snd)
     ]
 
+def metricGroupToJson (group : MetricGroup) : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("key", Lean.Json.str group.key)
+    , ("label", Lean.Json.str group.label)
+    , ("order", Lean.Json.num (Lean.JsonNumber.fromNat group.order))
+    , ("category", Lean.Json.str group.category)
+    ]
+
 def uiSpecJson : Lean.Json :=
   Lean.Json.mkObj
-    [ ("view_tabs", Lean.Json.arr (viewTabs.map viewTabToJson))
+    [ ("metric_groups", Lean.Json.arr (metricGroups.map metricGroupToJson))
+    , ("view_tabs", Lean.Json.arr (viewTabs.map viewTabToJson))
     , ("category_buttons", Lean.Json.arr (categoryButtons.map categoryButtonToJson))
     , ("timeline_color_options", Lean.Json.arr (timelineColorOptions.map optionToJson))
     , ("allocs_group_options", Lean.Json.arr (allocsGroupOptions.map optionToJson))

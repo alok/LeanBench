@@ -12,17 +12,17 @@ interface MetricSpec {
   default_blend_weight?: number;
 }
 
+type MetricGroupCategory = "all" | "compile" | "runtime";
+
+interface UiSpecMetricGroup {
+  key: string;
+  label: string;
+  order: number;
+  category: MetricGroupCategory;
+}
+
 /** Metric group metadata for organizing selectors. */
-const METRIC_GROUPS: Record<string, { label: string; order: number }> = {
-  textscan: { label: "Compile-time (Text)", order: 0 },
-  infotree: { label: "Compile-time (Semantic)", order: 1 },
-  profiler: { label: "Compile-time (Profiler)", order: 2 },
-  cpu: { label: "Runtime: CPU", order: 3 },
-  gpu: { label: "Runtime: GPU", order: 4 },
-  memory: { label: "Runtime: Memory", order: 5 },
-  ffi: { label: "Runtime: FFI", order: 6 },
-  other: { label: "Other", order: 99 },
-};
+let metricGroups: Record<string, UiSpecMetricGroup> = {};
 
 interface Span {
   file?: string;
@@ -129,6 +129,7 @@ interface UiSpecOption {
 }
 
 interface UiSpec {
+  metric_groups: UiSpecMetricGroup[];
   view_tabs: UiSpecOption[];
   category_buttons: UiSpecOption[];
   timeline_color_options: UiSpecOption[];
@@ -168,10 +169,7 @@ const allocsGroupBy = document.getElementById("allocsGroupBy") as HTMLSelectElem
 const BLEND_KEY = "__blend__";
 
 // Category filters for metric groups
-type MetricCategory = "all" | "compile" | "runtime";
-
-const COMPILE_GROUPS = new Set(["textscan", "infotree", "profiler"]);
-const RUNTIME_GROUPS = new Set(["cpu", "gpu", "memory", "ffi"]);
+type MetricCategory = MetricGroupCategory;
 
 const categoryToggle = document.getElementById("categoryToggle") as HTMLDivElement | null;
 
@@ -210,6 +208,16 @@ const state: {
 };
 
 const defaultUiSpec: UiSpec = {
+  metric_groups: [
+    { key: "textscan", label: "Compile-time (Text)", order: 0, category: "compile" },
+    { key: "infotree", label: "Compile-time (Semantic)", order: 1, category: "compile" },
+    { key: "profiler", label: "Compile-time (Profiler)", order: 2, category: "compile" },
+    { key: "cpu", label: "Runtime: CPU", order: 3, category: "runtime" },
+    { key: "gpu", label: "Runtime: GPU", order: 4, category: "runtime" },
+    { key: "memory", label: "Runtime: Memory", order: 5, category: "runtime" },
+    { key: "ffi", label: "Runtime: FFI", order: 6, category: "runtime" },
+    { key: "other", label: "Other", order: 99, category: "all" },
+  ],
   view_tabs: [
     { key: "treemap", label: "Treemap", active: true },
     { key: "timeline", label: "Timeline" },
@@ -366,7 +374,15 @@ function buildAllocLegend(spec: UiSpec): void {
   });
 }
 
+function applyMetricGroups(groups: UiSpecMetricGroup[]): void {
+  metricGroups = {};
+  groups.forEach((group) => {
+    metricGroups[group.key] = group;
+  });
+}
+
 function applyUiSpec(spec: UiSpec): void {
+  applyMetricGroups(spec.metric_groups || defaultUiSpec.metric_groups);
   buildViewTabs(spec);
   buildCategoryButtons(spec);
   buildSelectOptions(timelineColorBy, spec.timeline_color_options);
@@ -464,9 +480,10 @@ function renderBlendPanel(): void {
 /** Check if a metric group passes the current category filter. */
 function groupPassesCategoryFilter(group: string, category: MetricCategory): boolean {
   if (category === "all") return true;
-  if (category === "compile") return COMPILE_GROUPS.has(group) || group === "other";
-  if (category === "runtime") return RUNTIME_GROUPS.has(group) || group === "other";
-  return true;
+  const meta = metricGroups[group];
+  if (!meta) return false;
+  if (meta.category === "all") return true;
+  return meta.category === category;
 }
 
 /** Group specs by their group property and sort by group order. */
@@ -484,8 +501,8 @@ function groupSpecsByCategory(specs: MetricSpec[], category: MetricCategory = "a
   // Sort groups by their defined order
   const sortedGroups = new Map<string, MetricSpec[]>();
   const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
-    const orderA = METRIC_GROUPS[a]?.order ?? 99;
-    const orderB = METRIC_GROUPS[b]?.order ?? 99;
+    const orderA = metricGroups[a]?.order ?? 99;
+    const orderB = metricGroups[b]?.order ?? 99;
     return orderA - orderB;
   });
 
@@ -512,7 +529,7 @@ function populateSelectWithGroups(
   }
 
   grouped.forEach((specs, groupKey) => {
-    const groupLabel = METRIC_GROUPS[groupKey]?.label || groupKey;
+    const groupLabel = metricGroups[groupKey]?.label || groupKey;
     const optgroup = document.createElement("optgroup");
     optgroup.label = groupLabel;
 

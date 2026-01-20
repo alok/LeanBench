@@ -1,15 +1,6 @@
 "use strict";
 /** Metric group metadata for organizing selectors. */
-const METRIC_GROUPS = {
-    textscan: { label: "Compile-time (Text)", order: 0 },
-    infotree: { label: "Compile-time (Semantic)", order: 1 },
-    profiler: { label: "Compile-time (Profiler)", order: 2 },
-    cpu: { label: "Runtime: CPU", order: 3 },
-    gpu: { label: "Runtime: GPU", order: 4 },
-    memory: { label: "Runtime: Memory", order: 5 },
-    ffi: { label: "Runtime: FFI", order: 6 },
-    other: { label: "Other", order: 99 },
-};
+let metricGroups = {};
 const fileInput = document.getElementById("fileInput");
 const rootInput = document.getElementById("rootInput");
 const sizeSelect = document.getElementById("sizeSelect");
@@ -38,8 +29,6 @@ const allocsLegend = document.getElementById("allocsLegend");
 const timelineColorBy = document.getElementById("timelineColorBy");
 const allocsGroupBy = document.getElementById("allocsGroupBy");
 const BLEND_KEY = "__blend__";
-const COMPILE_GROUPS = new Set(["textscan", "infotree", "profiler"]);
-const RUNTIME_GROUPS = new Set(["cpu", "gpu", "memory", "ffi"]);
 const categoryToggle = document.getElementById("categoryToggle");
 const urlParams = new URLSearchParams(window.location.search);
 const initialDataUrl = urlParams.get("data");
@@ -61,6 +50,16 @@ const state = {
     metricCategory: "all",
 };
 const defaultUiSpec = {
+    metric_groups: [
+        { key: "textscan", label: "Compile-time (Text)", order: 0, category: "compile" },
+        { key: "infotree", label: "Compile-time (Semantic)", order: 1, category: "compile" },
+        { key: "profiler", label: "Compile-time (Profiler)", order: 2, category: "compile" },
+        { key: "cpu", label: "Runtime: CPU", order: 3, category: "runtime" },
+        { key: "gpu", label: "Runtime: GPU", order: 4, category: "runtime" },
+        { key: "memory", label: "Runtime: Memory", order: 5, category: "runtime" },
+        { key: "ffi", label: "Runtime: FFI", order: 6, category: "runtime" },
+        { key: "other", label: "Other", order: 99, category: "all" },
+    ],
     view_tabs: [
         { key: "treemap", label: "Treemap", active: true },
         { key: "timeline", label: "Timeline" },
@@ -219,7 +218,14 @@ function buildAllocLegend(spec) {
         allocsLegend.appendChild(entry);
     });
 }
+function applyMetricGroups(groups) {
+    metricGroups = {};
+    groups.forEach((group) => {
+        metricGroups[group.key] = group;
+    });
+}
 function applyUiSpec(spec) {
+    applyMetricGroups(spec.metric_groups || defaultUiSpec.metric_groups);
     buildViewTabs(spec);
     buildCategoryButtons(spec);
     buildSelectOptions(timelineColorBy, spec.timeline_color_options);
@@ -319,11 +325,12 @@ function renderBlendPanel() {
 function groupPassesCategoryFilter(group, category) {
     if (category === "all")
         return true;
-    if (category === "compile")
-        return COMPILE_GROUPS.has(group) || group === "other";
-    if (category === "runtime")
-        return RUNTIME_GROUPS.has(group) || group === "other";
-    return true;
+    const meta = metricGroups[group];
+    if (!meta)
+        return false;
+    if (meta.category === "all")
+        return true;
+    return meta.category === category;
 }
 /** Group specs by their group property and sort by group order. */
 function groupSpecsByCategory(specs, category = "all") {
@@ -340,8 +347,8 @@ function groupSpecsByCategory(specs, category = "all") {
     // Sort groups by their defined order
     const sortedGroups = new Map();
     const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
-        const orderA = METRIC_GROUPS[a]?.order ?? 99;
-        const orderB = METRIC_GROUPS[b]?.order ?? 99;
+        const orderA = metricGroups[a]?.order ?? 99;
+        const orderB = metricGroups[b]?.order ?? 99;
         return orderA - orderB;
     });
     sortedKeys.forEach((key) => {
@@ -359,7 +366,7 @@ function populateSelectWithGroups(select, grouped, includeBlend = false) {
         select.appendChild(blendOpt);
     }
     grouped.forEach((specs, groupKey) => {
-        const groupLabel = METRIC_GROUPS[groupKey]?.label || groupKey;
+        const groupLabel = metricGroups[groupKey]?.label || groupKey;
         const optgroup = document.createElement("optgroup");
         optgroup.label = groupLabel;
         specs.forEach((spec) => {
