@@ -1,0 +1,141 @@
+{
+  "schema_version": "0.1.0",
+  "generated_at": "2026-01-20T23:40:00Z",
+  "project": {
+    "name": "LeanBench",
+    "root": "/Users/alokbeniwal/LeanBench",
+    "commit": "",
+    "tool": "leanobserve"
+  },
+  "metrics": [
+    {
+      "key": "size",
+      "label": "Size",
+      "kind": "bytes",
+      "group": "textscan"
+    }
+  ],
+  "root": {
+    "id": "root",
+    "name": "LeanBench",
+    "path": ".",
+    "children": [
+      {
+        "id": "LeanObserve.lean",
+        "name": "LeanObserve.lean",
+        "path": "LeanObserve.lean",
+        "metrics": {
+          "size": 16250
+        }
+      },
+      {
+        "id": "LeanBench/Runtime",
+        "name": "Runtime",
+        "path": "LeanBench/Runtime",
+        "children": [
+          {
+            "id": "Types.lean",
+            "name": "Types.lean",
+            "path": "LeanBench/Runtime/Types.lean",
+            "metrics": {
+              "size": 9120
+            }
+          },
+          {
+            "id": "GenericCollector.lean",
+            "name": "GenericCollector.lean",
+            "path": "LeanBench/Runtime/GenericCollector.lean",
+            "metrics": {
+              "size": 7340
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "cpu_info": {
+    "name": "Apple M3 Pro",
+    "cores": 12,
+    "threads": 12,
+    "frequency_mhz": 3500
+  },
+  "gpu_info": {
+    "name": "Apple M3 Pro GPU",
+    "vendor": "Apple",
+    "compute_units": 18,
+    "memory_bytes": 34359738368,
+    "peak_bandwidth_gbps": 300.0
+  },
+  "gpu_kernels": [
+    {
+      "name": "matrix_mul_32x32",
+      "stream": 0,
+      "start_ns": 120000000,
+      "duration_ns": 5200000,
+      "occupancy_percent": 78.4,
+      "achieved_bandwidth_gbps": 214.6,
+      "lean_decl": "Bench.matmul"
+    },
+    {
+      "name": "layer_norm",
+      "stream": 0,
+      "start_ns": 130500000,
+      "duration_ns": 2400000,
+      "occupancy_percent": 62.1,
+      "achieved_bandwidth_gbps": 188.2,
+      "lean_decl": "Bench.layerNorm"
+    }
+  ],
+  "gpu_memory_events": [
+    {
+      "type": "alloc",
+      "bytes": 134217728,
+      "timestamp_ns": 118000000,
+      "lean_decl": "Bench.allocWeights"
+    },
+    {
+      "type": "transfer_h2d",
+      "bytes": 268435456,
+      "timestamp_ns": 118500000,
+      "lean_decl": "Bench.uploadBatch"
+    },
+    {
+      "type": "transfer_d2h",
+      "bytes": 67108864,
+      "timestamp_ns": 136000000,
+      "lean_decl": "Bench.downloadStats"
+    },
+    {
+      "type": "transfer_d2d",
+      "bytes": 33554432,
+      "timestamp_ns": 137500000,
+      "lean_decl": "Bench.shuffleBuffers"
+    },
+    {
+      "type": "free",
+      "bytes": 134217728,
+      "timestamp_ns": 140000000,
+      "lean_decl": "Bench.freeWeights"
+    }
+  ],
+  "frames": [
+    {
+      "frame_id": 1,
+      "start_ns": 110000000,
+      "duration_ns": 32000000,
+      "cpu_time_ns": 18000000,
+      "gpu_time_ns": 12000000,
+      "gpu_kernel_count": 2,
+      "memory_alloc_bytes": 134217728,
+      "memory_free_bytes": 134217728
+    }
+  ],
+  "ffi_calls": [
+    {
+      "extern_name": "metal_dispatch",
+      "lean_decl": "Bench.runMetal",
+      "call_count": 2,
+      "total_time_ns": 7600000
+    }
+  ]
+}
