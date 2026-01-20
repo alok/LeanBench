@@ -17,32 +17,7 @@
         <div class="title">Metrics Explorer</div>
         <nav class="view-tabs" id="viewTabs"></nav>
       </div>
-      <div class="controls">
-        <label class="control">
-          <span>Metrics JSON</span>
-          <input id="fileInput" type="file" accept="application/json" />
-        </label>
-        <label class="control">
-          <span>Root Path (for editor links)</span>
-          <input id="rootInput" type="text" placeholder="/abs/path/to/project" />
-        </label>
-        <div class="control">
-          <span>Metric Category</span>
-          <div class="category-toggle" id="categoryToggle"></div>
-        </div>
-        <label class="control">
-          <span>Size Metric</span>
-          <select id="sizeSelect"></select>
-        </label>
-        <label class="control">
-          <span>Color Metric</span>
-          <select id="colorSelect"></select>
-        </label>
-        <label class="control toggle">
-          <input id="showLabels" type="checkbox" />
-          <span>Show labels</span>
-        </label>
-      </div>
+      <div class="controls" id="controls"></div>
       <div class="blend-panel" id="blendPanel" hidden>
         <div class="blend-title">Blend Weights</div>
         <div class="blend-list" id="blendList"></div>

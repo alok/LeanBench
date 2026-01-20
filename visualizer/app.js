@@ -1,13 +1,14 @@
 "use strict";
 /** Metric group metadata for organizing selectors. */
 let metricGroups = {};
-const fileInput = document.getElementById("fileInput");
-const rootInput = document.getElementById("rootInput");
-const sizeSelect = document.getElementById("sizeSelect");
-const colorSelect = document.getElementById("colorSelect");
+const controlsRoot = document.getElementById("controls");
+let fileInput = null;
+let rootInput = null;
+let sizeSelect = null;
+let colorSelect = null;
 const listSelect = document.getElementById("listSelect");
 const listCount = document.getElementById("listCount");
-const showLabels = document.getElementById("showLabels");
+let showLabels = null;
 const tooltip = document.getElementById("tooltip");
 const treemapEl = document.getElementById("treemap");
 const blendPanel = document.getElementById("blendPanel");
@@ -29,7 +30,7 @@ const allocsLegend = document.getElementById("allocsLegend");
 const timelineColorBy = document.getElementById("timelineColorBy");
 const allocsGroupBy = document.getElementById("allocsGroupBy");
 const BLEND_KEY = "__blend__";
-const categoryToggle = document.getElementById("categoryToggle");
+let categoryToggle = null;
 const urlParams = new URLSearchParams(window.location.search);
 const initialDataUrl = urlParams.get("data");
 const initialRoot = urlParams.get("root");
@@ -59,6 +60,14 @@ const defaultUiSpec = {
         { key: "memory", label: "Runtime: Memory", order: 5, category: "runtime" },
         { key: "ffi", label: "Runtime: FFI", order: 6, category: "runtime" },
         { key: "other", label: "Other", order: 99, category: "all" },
+    ],
+    controls: [
+        { id: "fileInput", label: "Metrics JSON", kind: "file", accept: "application/json" },
+        { id: "rootInput", label: "Root Path (for editor links)", kind: "text", placeholder: "/abs/path/to/project" },
+        { id: "categoryToggle", label: "Metric Category", kind: "button-group" },
+        { id: "sizeSelect", label: "Size Metric", kind: "select" },
+        { id: "colorSelect", label: "Color Metric", kind: "select" },
+        { id: "showLabels", label: "Show labels", kind: "toggle" },
     ],
     view_tabs: [
         { key: "treemap", label: "Treemap", active: true },
@@ -179,6 +188,128 @@ function buildSelectOptions(select, options) {
         select.appendChild(option);
     });
 }
+function resolveUiSpec(spec) {
+    return {
+        metric_groups: Array.isArray(spec.metric_groups) && spec.metric_groups.length ? spec.metric_groups : defaultUiSpec.metric_groups,
+        controls: Array.isArray(spec.controls) && spec.controls.length ? spec.controls : defaultUiSpec.controls,
+        view_tabs: Array.isArray(spec.view_tabs) && spec.view_tabs.length ? spec.view_tabs : defaultUiSpec.view_tabs,
+        category_buttons: Array.isArray(spec.category_buttons) && spec.category_buttons.length
+            ? spec.category_buttons
+            : defaultUiSpec.category_buttons,
+        timeline_color_options: Array.isArray(spec.timeline_color_options) && spec.timeline_color_options.length
+            ? spec.timeline_color_options
+            : defaultUiSpec.timeline_color_options,
+        allocs_group_options: Array.isArray(spec.allocs_group_options) && spec.allocs_group_options.length
+            ? spec.allocs_group_options
+            : defaultUiSpec.allocs_group_options,
+        alloc_legend: Array.isArray(spec.alloc_legend) && spec.alloc_legend.length ? spec.alloc_legend : defaultUiSpec.alloc_legend,
+    };
+}
+function buildControls(spec) {
+    if (!controlsRoot)
+        return;
+    controlsRoot.innerHTML = "";
+    spec.controls.forEach((control) => {
+        const wrapper = document.createElement("label");
+        if (control.kind === "toggle") {
+            wrapper.className = "control toggle";
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.id = control.id;
+            if (control.checked)
+                input.checked = true;
+            wrapper.appendChild(input);
+            const label = document.createElement("span");
+            label.textContent = control.label;
+            wrapper.appendChild(label);
+            controlsRoot.appendChild(wrapper);
+            return;
+        }
+        wrapper.className = "control";
+        const label = document.createElement("span");
+        label.textContent = control.label;
+        wrapper.appendChild(label);
+        switch (control.kind) {
+            case "file": {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.id = control.id;
+                if (control.accept)
+                    input.accept = control.accept;
+                wrapper.appendChild(input);
+                break;
+            }
+            case "text": {
+                const input = document.createElement("input");
+                input.type = "text";
+                input.id = control.id;
+                if (control.placeholder)
+                    input.placeholder = control.placeholder;
+                wrapper.appendChild(input);
+                break;
+            }
+            case "select": {
+                const select = document.createElement("select");
+                select.id = control.id;
+                wrapper.appendChild(select);
+                break;
+            }
+            case "button-group": {
+                const group = document.createElement("div");
+                group.className = "category-toggle";
+                group.id = control.id;
+                wrapper.appendChild(group);
+                break;
+            }
+            default:
+                break;
+        }
+        controlsRoot.appendChild(wrapper);
+    });
+}
+function refreshControlHandles() {
+    fileInput = document.getElementById("fileInput");
+    rootInput = document.getElementById("rootInput");
+    sizeSelect = document.getElementById("sizeSelect");
+    colorSelect = document.getElementById("colorSelect");
+    showLabels = document.getElementById("showLabels");
+    categoryToggle = document.getElementById("categoryToggle");
+}
+function wireControlHandlers() {
+    fileInput?.addEventListener("change", async (event) => {
+        const target = event.target;
+        const file = target.files ? target.files[0] : null;
+        if (!file)
+            return;
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        state.data = parsed;
+        if (!state.rootPrefix && parsed.project?.root && parsed.project.root.startsWith("/")) {
+            state.rootPrefix = parsed.project.root;
+            if (rootInput)
+                rootInput.value = state.rootPrefix;
+        }
+        updateMetricSelectors();
+        renderTreemap();
+        renderSystemInfo();
+    });
+    rootInput?.addEventListener("input", (event) => {
+        const target = event.target;
+        state.rootPrefix = target.value.trim();
+    });
+    sizeSelect?.addEventListener("change", (event) => {
+        const target = event.target;
+        state.sizeKey = target.value;
+        renderTreemap();
+    });
+    colorSelect?.addEventListener("change", (event) => {
+        const target = event.target;
+        state.colorKey = target.value;
+        renderBlendPanel();
+        renderTreemap();
+    });
+    showLabels?.addEventListener("change", () => renderTreemap());
+}
 function buildViewTabs(spec) {
     if (!viewTabsContainer)
         return;
@@ -192,15 +323,16 @@ function buildViewTabs(spec) {
     });
 }
 function buildCategoryButtons(spec) {
-    if (!categoryToggle)
+    const toggle = categoryToggle;
+    if (!toggle)
         return;
-    categoryToggle.innerHTML = "";
+    toggle.innerHTML = "";
     spec.category_buttons.forEach((btn) => {
         const button = document.createElement("button");
         button.className = `category-btn${btn.active ? " active" : ""}`;
         button.dataset.category = btn.key;
         button.textContent = btn.label;
-        categoryToggle.appendChild(button);
+        toggle.appendChild(button);
     });
 }
 function buildAllocLegend(spec) {
@@ -225,20 +357,34 @@ function applyMetricGroups(groups) {
     });
 }
 function applyUiSpec(spec) {
-    applyMetricGroups(spec.metric_groups || defaultUiSpec.metric_groups);
-    buildViewTabs(spec);
-    buildCategoryButtons(spec);
-    buildSelectOptions(timelineColorBy, spec.timeline_color_options);
-    buildSelectOptions(allocsGroupBy, spec.allocs_group_options);
-    buildAllocLegend(spec);
-    const activeView = spec.view_tabs.find((tab) => tab.active)?.key;
+    const resolved = resolveUiSpec(spec);
+    const prevRoot = rootInput?.value || state.rootPrefix;
+    const prevShowLabels = showLabels?.checked;
+    applyMetricGroups(resolved.metric_groups);
+    buildViewTabs(resolved);
+    buildControls(resolved);
+    refreshControlHandles();
+    buildCategoryButtons(resolved);
+    buildSelectOptions(timelineColorBy, resolved.timeline_color_options);
+    buildSelectOptions(allocsGroupBy, resolved.allocs_group_options);
+    buildAllocLegend(resolved);
+    if (!state.rootPrefix && initialRoot)
+        state.rootPrefix = initialRoot;
+    if (prevRoot)
+        state.rootPrefix = prevRoot;
+    if (rootInput && state.rootPrefix)
+        rootInput.value = state.rootPrefix;
+    if (showLabels && typeof prevShowLabels === "boolean")
+        showLabels.checked = prevShowLabels;
+    const activeView = resolved.view_tabs.find((tab) => tab.active)?.key;
     if (activeView)
         state.currentView = activeView;
-    const activeCategory = spec.category_buttons.find((btn) => btn.active)?.key;
+    const activeCategory = resolved.category_buttons.find((btn) => btn.active)?.key;
     if (activeCategory)
         state.metricCategory = activeCategory;
     wireViewTabs();
     wireCategoryToggle();
+    wireControlHandlers();
     switchView(state.currentView);
     if (state.data) {
         updateMetricSelectors();
@@ -728,23 +874,6 @@ function openInEditor(node) {
     const url = `vscode://file/${file}:${line}:${col}`;
     window.open(url, "_blank");
 }
-fileInput?.addEventListener("change", async (event) => {
-    const target = event.target;
-    const file = target.files ? target.files[0] : null;
-    if (!file)
-        return;
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    state.data = parsed;
-    if (!state.rootPrefix && parsed.project?.root && parsed.project.root.startsWith("/")) {
-        state.rootPrefix = parsed.project.root;
-        if (rootInput)
-            rootInput.value = state.rootPrefix;
-    }
-    updateMetricSelectors();
-    renderTreemap();
-    renderSystemInfo();
-});
 async function loadFromUrl(url) {
     const resolved = new URL(url, window.location.href).toString();
     const resp = await fetch(resolved);
@@ -760,30 +889,11 @@ async function loadFromUrl(url) {
     renderTreemap();
     renderSystemInfo();
 }
-if (initialRoot && rootInput) {
-    state.rootPrefix = initialRoot;
-    rootInput.value = initialRoot;
-}
 if (initialDataUrl) {
     loadFromUrl(initialDataUrl).catch((err) => {
         console.error(err);
     });
 }
-rootInput?.addEventListener("input", (event) => {
-    const target = event.target;
-    state.rootPrefix = target.value.trim();
-});
-sizeSelect?.addEventListener("change", (event) => {
-    const target = event.target;
-    state.sizeKey = target.value;
-    renderTreemap();
-});
-colorSelect?.addEventListener("change", (event) => {
-    const target = event.target;
-    state.colorKey = target.value;
-    renderBlendPanel();
-    renderTreemap();
-});
 listSelect?.addEventListener("change", (event) => {
     const target = event.target;
     state.listKey = target.value;
@@ -791,11 +901,11 @@ listSelect?.addEventListener("change", (event) => {
     renderTreemap();
 });
 listCount?.addEventListener("input", () => renderTreemap());
-showLabels?.addEventListener("change", () => renderTreemap());
 function wireCategoryToggle() {
-    if (!categoryToggle)
+    const toggle = categoryToggle;
+    if (!toggle)
         return;
-    const categoryButtons = categoryToggle.querySelectorAll(".category-btn");
+    const categoryButtons = toggle.querySelectorAll(".category-btn");
     categoryButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
             const category = btn.dataset.category;
