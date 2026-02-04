@@ -7,15 +7,20 @@ import LeanBench.Plan
 
 namespace LeanBench
 
+@[inline] def leanbenchVersion : String := "0.1.1"
+@[inline] def jsonSchemaVersion : Nat := 1
+
 inductive OutputFormat where
   | pretty
   | prettyFull
   | json
+  | jsonl
   | radar
   deriving Inhabited, BEq
 
 structure CliConfig where
   format : OutputFormat := .pretty
+  args : Array String := #[]
   listOnly : Bool := false
   listTags : Bool := false
   listSuites : Bool := false
@@ -37,8 +42,14 @@ structure CliConfig where
   radarSuite : Option String := none
   radarOut : Option System.FilePath := none
   jsonOut : Option System.FilePath := none
+  jsonlOut : Option System.FilePath := none
   comparePath : Option System.FilePath := none
   savePath : Option System.FilePath := none
+  artifactsDir : Option System.FilePath := none
+  failOnRegressions : Bool := false
+  regressAbsNs? : Option Nat := none
+  regressRatio? : Option Float := none
+  regressPct? : Option Float := none
   quiet : Bool := false
 
 structure BenchStats where
@@ -58,6 +69,14 @@ structure BenchResult where
   stats : BenchStats
   samples : Array Nat
   extras : Option Lean.Json := none
+
+structure Regression where
+  name : String
+  base : Float
+  mean : Float
+  ratio : Float
+  deltaPct : Float
+  deltaNs : Float
 
 @[inline] def nsPerMs : Nat := 1_000_000
 @[inline] def nsPerUs : Nat := 1_000
@@ -259,6 +278,9 @@ structure BenchResult where
 @[inline] def itemsPerSec? (r : BenchResult) : Option Float :=
   r.config.items.map (fun items => ratePerSec (scaledUnits r.config items) r.stats.meanNs)
 
+@[inline] def hasRegressionThresholds (cfg : CliConfig) : Bool :=
+  cfg.regressAbsNs?.isSome || cfg.regressRatio?.isSome || cfg.regressPct?.isSome
+
 @[inline] def baselineFor (baseline? : Option (Std.HashMap String Float)) (name : String) : Option Float :=
   match baseline? with
   | none => none
@@ -362,42 +384,149 @@ structure BenchResult where
     blocks := blocks.push block
   return String.intercalate "" blocks.toList
 
+@[inline] def regressionThresholdsSummary (cfg : CliConfig) : String := Id.run do
+  let mut parts : Array String := #[]
+  match cfg.regressAbsNs? with
+  | none => pure ()
+  | some v => parts := parts.push s!"abs_ns>={v}"
+  match cfg.regressRatio? with
+  | none => pure ()
+  | some v => parts := parts.push s!"ratio>={formatFloat3 v}"
+  match cfg.regressPct? with
+  | none => pure ()
+  | some v => parts := parts.push s!"pct>={formatFloat3 v}%"
+  if parts.isEmpty then
+    return "any regression"
+  return String.intercalate ", " parts.toList
+
+@[inline] def isRegression (cfg : CliConfig) (base mean : Float) : Bool :=
+  if mean <= base then
+    false
+  else
+    let absHit :=
+      match cfg.regressAbsNs? with
+      | none => false
+      | some v => mean - base >= Float.ofNat v
+    let ratioHit :=
+      match cfg.regressRatio? with
+      | none => false
+      | some v => mean / base >= v
+    let pctHit :=
+      match cfg.regressPct? with
+      | none => false
+      | some v => ((mean - base) / base * 100.0) >= v
+    if !hasRegressionThresholds cfg then
+      true
+    else
+      absHit || ratioHit || pctHit
+
+@[inline] def collectRegressions (results : Array BenchResult) (baseline : Std.HashMap String Float)
+    (cfg : CliConfig) : Array Regression := Id.run do
+  let mut out : Array Regression := #[]
+  for r in results do
+    match baseline.get? r.entry.name with
+    | none => pure ()
+    | some base =>
+        if base > 0.0 then
+          let mean := r.stats.meanNs
+          if isRegression cfg base mean then
+            let ratio := mean / base
+            let deltaPct := (mean - base) / base * 100.0
+            let deltaNs := mean - base
+            out := out.push {
+              name := r.entry.name
+              base := base
+              mean := mean
+              ratio := ratio
+              deltaPct := deltaPct
+              deltaNs := deltaNs
+            }
+  return out
+
+@[inline] def renderRegressionSummary (regressions : Array Regression) (cfg : CliConfig) : String :=
+  if regressions.isEmpty then
+    ""
+  else
+    let header := s!"Regressions ({regressions.size}) [thresholds: {regressionThresholdsSummary cfg}]:"
+    let lines := regressions.map fun r =>
+      s!"- {r.name}: {formatSigned r.deltaPct}% ({formatFloat3 r.ratio}x, {formatNsFloat r.deltaNs})"
+    String.intercalate "\n" (header :: lines.toList)
+
 @[inline] def renderPretty (results : Array BenchResult) : String :=
   renderPrettyWithBaseline results none false false
 
-@[inline] def renderJson (results : Array BenchResult) : String :=
-  let items := results.toList.map fun r =>
-    let name := jsonEscape r.entry.name
-    let bandwidth := match bandwidthGbps? r with
-      | some v => formatFloat3 v
-      | none => "null"
-    let gflops := match throughputGflops? r with
-      | some v => formatFloat3 v
-      | none => "null"
-    let itemsPerSec := match itemsPerSec? r with
-      | some v => formatFloat3 v
-      | none => "null"
-    let extras := match r.extras with
-      | some v => Lean.Json.compress v
-      | none => "null"
-    let fields := #[
-      "\"name\":\"" ++ name ++ "\"",
-      "\"mean_ns\":" ++ r.stats.meanNs.toString,
-      "\"stddev_ns\":" ++ r.stats.stddevNs.toString,
-      "\"min_ns\":" ++ toString r.stats.minNs,
-      "\"max_ns\":" ++ toString r.stats.maxNs,
-      "\"median_ns\":" ++ toString r.stats.medianNs,
-      "\"p95_ns\":" ++ toString r.stats.p95Ns,
-      "\"p99_ns\":" ++ toString r.stats.p99Ns,
-      "\"samples\":" ++ toString r.stats.samples,
-      "\"total_ns\":" ++ toString r.stats.totalNs,
-      "\"bandwidth_gbps\":" ++ bandwidth,
-      "\"throughput_gflops\":" ++ gflops,
-      "\"items_per_s\":" ++ itemsPerSec,
-      "\"extras\":" ++ extras
-    ]
-    "{" ++ String.intercalate "," fields.toList ++ "}"
-  "[" ++ String.intercalate "," items ++ "]"
+@[inline] def renderBenchResultJson (r : BenchResult) : String :=
+  let name := jsonEscape r.entry.name
+  let bandwidth := match bandwidthGbps? r with
+    | some v => formatFloat3 v
+    | none => "null"
+  let gflops := match throughputGflops? r with
+    | some v => formatFloat3 v
+    | none => "null"
+  let itemsPerSec := match itemsPerSec? r with
+    | some v => formatFloat3 v
+    | none => "null"
+  let extras := match r.extras with
+    | some v => Lean.Json.compress v
+    | none => "null"
+  let fields := #[
+    "\"name\":\"" ++ name ++ "\"",
+    "\"mean_ns\":" ++ r.stats.meanNs.toString,
+    "\"stddev_ns\":" ++ r.stats.stddevNs.toString,
+    "\"min_ns\":" ++ toString r.stats.minNs,
+    "\"max_ns\":" ++ toString r.stats.maxNs,
+    "\"median_ns\":" ++ toString r.stats.medianNs,
+    "\"p95_ns\":" ++ toString r.stats.p95Ns,
+    "\"p99_ns\":" ++ toString r.stats.p99Ns,
+    "\"samples\":" ++ toString r.stats.samples,
+    "\"total_ns\":" ++ toString r.stats.totalNs,
+    "\"bandwidth_gbps\":" ++ bandwidth,
+    "\"throughput_gflops\":" ++ gflops,
+    "\"items_per_s\":" ++ itemsPerSec,
+    "\"extras\":" ++ extras
+  ]
+  "{" ++ String.intercalate "," fields.toList ++ "}"
+
+@[inline] def renderResultsJson (results : Array BenchResult) : String :=
+  jsonArray (results.map renderBenchResultJson)
+
+@[inline] def renderRunMetaJson (manifest : RunManifest) (manifestHash : String) (args : Array String) : String :=
+  let arch := match manifest.arch with | none => "null" | some s => jsonString s
+  let lake := match manifest.lakeVersion with | none => "null" | some s => jsonString s
+  let git := match manifest.gitSha with | none => "null" | some s => jsonString s
+  let ts := match manifest.generatedEpochSec with | none => "null" | some s => jsonString s
+  let partition := match manifest.partition with | none => "null" | some p => renderPartitionJson p
+  let argsJson := jsonArray (args.map jsonString)
+  "{" ++
+    "\"tool\":" ++ jsonString "leanbench" ++ "," ++
+    "\"version\":" ++ jsonString leanbenchVersion ++ "," ++
+    "\"plan_hash\":" ++ jsonString manifest.planHash ++ "," ++
+    "\"manifest_hash\":" ++ jsonString manifestHash ++ "," ++
+    "\"bench_count\":" ++ toString manifest.benchCount ++ "," ++
+    "\"partition\":" ++ partition ++ "," ++
+    "\"os\":" ++ jsonString manifest.os ++ "," ++
+    "\"arch\":" ++ arch ++ "," ++
+    "\"lean_version\":" ++ jsonString manifest.leanVersion ++ "," ++
+    "\"lake_version\":" ++ lake ++ "," ++
+    "\"git_sha\":" ++ git ++ "," ++
+    "\"generated_epoch_sec\":" ++ ts ++ "," ++
+    "\"args\":" ++ argsJson ++
+  "}"
+
+@[inline] def renderRunResultsJson (results : Array BenchResult) (runMetaJson : String) : String :=
+  let items := jsonArray (results.map renderBenchResultJson)
+  "{" ++
+    "\"schema_version\":" ++ toString jsonSchemaVersion ++ "," ++
+    "\"run\":" ++ runMetaJson ++ "," ++
+    "\"results\":" ++ items ++
+  "}"
+
+@[inline] def renderRunResultJsonLine (r : BenchResult) (runMetaJson : String) : String :=
+  "{" ++
+    "\"schema_version\":" ++ toString jsonSchemaVersion ++ "," ++
+    "\"run\":" ++ runMetaJson ++ "," ++
+    "\"result\":" ++ renderBenchResultJson r ++
+  "}"
 
 @[inline] def radarName (benchName : String) (benchSuite : Option String) (radarSuite : Option String) : String :=
   match radarSuite with
@@ -446,13 +575,24 @@ structure BenchResult where
                   | some mean => pure (name, mean)
   | _ => throw "baseline JSON must be an array of objects"
 
+@[inline] def baselineItemsFromJson (json : Lean.Json) : Except String (Array Lean.Json) :=
+  match json with
+  | .arr items => return items
+  | .obj obj =>
+      match jsonObjFind? obj "results" with
+      | some (.arr items) => return items
+      | some _ => throw "baseline JSON results must be an array"
+      | none => throw "baseline JSON object missing results"
+  | _ => throw "baseline JSON must be an array or object with results"
+
 @[inline] def loadBaseline (path : System.FilePath) : IO (Std.HashMap String Float) := do
   let data ← IO.FS.readFile path
   match Lean.Json.parse data with
   | .error err => throw <| IO.userError s!"baseline parse error: {err}"
   | .ok json =>
-      match json with
-      | .arr items =>
+      match baselineItemsFromJson json with
+      | .error err => throw <| IO.userError s!"baseline parse error: {err}"
+      | .ok items =>
           let mut map : Std.HashMap String Float := ∅
           for item in items do
             match parseBaselineEntry item with
@@ -461,12 +601,12 @@ structure BenchResult where
             | .error err =>
                 throw <| IO.userError s!"baseline parse error: {err}"
           return map
-      | _ => throw <| IO.userError "baseline JSON must be an array"
 
 @[inline] def parseFormat (s : String) : Option OutputFormat :=
   if s == "pretty" then some .pretty
   else if s == "full" || s == "pretty-full" then some .prettyFull
   else if s == "json" then some .json
+  else if s == "jsonl" then some .jsonl
   else if s == "radar" then some .radar
   else none
 
@@ -479,8 +619,62 @@ structure BenchResult where
         | none => some path
       { cfg with format := .json, jsonOut := jsonOut }
 
+@[inline] def parseFloatFlag (label : String) (raw : String) : IO Float := do
+  match Lean.Json.parse raw with
+  | .ok (.num n) => return n.toFloat
+  | .ok _ => throw <| IO.userError s!"{label} must be a number"
+  | .error err => throw <| IO.userError s!"{label} parse error: {err}"
+
+@[inline] def applyArtifacts (cfg : CliConfig) : IO CliConfig := do
+  match cfg.artifactsDir with
+  | none => pure cfg
+  | some dir =>
+      IO.FS.createDirAll dir
+      let planOut :=
+        if cfg.planOnly then
+          match cfg.planOut with
+          | some path => some path
+          | none => some (dir / "plan.json")
+        else
+          cfg.planOut
+      let manifestOut :=
+        match cfg.manifestOut with
+        | some path => some path
+        | none => some (dir / "manifest.json")
+      let jsonOut :=
+        if cfg.format == .json then
+          match cfg.jsonOut with
+          | some path => some path
+          | none => some (dir / "results.json")
+        else
+          cfg.jsonOut
+      let jsonlOut :=
+        if cfg.format == .jsonl then
+          match cfg.jsonlOut with
+          | some path => some path
+          | none => some (dir / "results.jsonl")
+        else
+          cfg.jsonlOut
+      return {
+        cfg with
+        planOut := planOut
+        manifestOut := manifestOut
+        jsonOut := jsonOut
+        jsonlOut := jsonlOut
+      }
+
+@[inline] def argsFromParsed (p : Cli.Parsed) : Array String := Id.run do
+  let mut out : Array String := #[]
+  for f in p.flags do
+    out := out.push (toString f)
+  for a in p.positionalArgs do
+    out := out.push a.value
+  for a in p.variableArgs do
+    out := out.push a.value
+  return out
+
 @[inline] def configFromParsed (p : Cli.Parsed) : IO CliConfig := do
-  let mut cfg : CliConfig := {}
+  let mut cfg : CliConfig := { args := argsFromParsed p }
   if p.hasFlag "list" then
     cfg := { cfg with listOnly := true }
   if p.hasFlag "list-tags" then
@@ -548,11 +742,36 @@ structure BenchResult where
   match p.flag? "json-out" with
   | some f => cfg := { cfg with jsonOut := some (System.FilePath.mk (f.as! String)) }
   | none => pure ()
+  match p.flag? "jsonl-out" with
+  | some f => cfg := { cfg with jsonlOut := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "artifacts" with
+  | some f => cfg := { cfg with artifactsDir := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
   match p.flag? "compare" with
   | some f => cfg := { cfg with comparePath := some (System.FilePath.mk (f.as! String)) }
   | none => pure ()
   match p.flag? "save" with
   | some f => cfg := { cfg with savePath := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  if p.hasFlag "fail-on-regressions" then
+    cfg := { cfg with failOnRegressions := true }
+  match p.flag? "regress-abs-ns" with
+  | some f => cfg := { cfg with regressAbsNs? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "regress-ratio" with
+  | some f =>
+      let v ← parseFloatFlag "regress-ratio" (f.as! String)
+      if v <= 0.0 then
+        throw <| IO.userError "regress-ratio must be > 0"
+      cfg := { cfg with regressRatio? := some v }
+  | none => pure ()
+  match p.flag? "regress-pct" with
+  | some f =>
+      let v ← parseFloatFlag "regress-pct" (f.as! String)
+      if v < 0.0 then
+        throw <| IO.userError "regress-pct must be >= 0"
+      cfg := { cfg with regressPct? := some v }
   | none => pure ()
   match p.flag? "format" with
   | some f =>
@@ -562,11 +781,18 @@ structure BenchResult where
       | none => throw <| IO.userError s!"unknown format: {fmt}"
   | none => pure ()
   let json := p.hasFlag "json"
+  let jsonl := p.hasFlag "jsonl"
   let radar := p.hasFlag "radar"
   if json && radar then
     throw <| IO.userError "cannot use --json and --radar together"
+  else if json && jsonl then
+    throw <| IO.userError "cannot use --json and --jsonl together"
+  else if jsonl && radar then
+    throw <| IO.userError "cannot use --jsonl and --radar together"
   else if json then
     cfg := { cfg with format := .json }
+  else if jsonl then
+    cfg := { cfg with format := .jsonl }
   else if radar then
     cfg := { cfg with format := .radar }
   return applySave cfg
@@ -596,6 +822,18 @@ structure BenchResult where
   | none => IO.println content
   | some path => appendFile path (content ++ "\n")
 
+@[inline] def writeRunResultJsonLines (results : Array BenchResult) (runMetaJson : String)
+    (path? : Option System.FilePath) : IO Unit := do
+  match path? with
+  | none =>
+      for r in results do
+        IO.println (renderRunResultJsonLine r runMetaJson)
+  | some path =>
+      IO.FS.withFile path .write (fun h => do
+        for r in results do
+          h.putStr (renderRunResultJsonLine r runMetaJson)
+          h.putStr "\n")
+
 @[inline] def writeOutput (content : String) (path? : Option System.FilePath) : IO Unit := do
   match path? with
   | none => IO.println content
@@ -609,7 +847,16 @@ structure BenchResult where
     partition := cfg.partition
     entries := entries }
 
+@[inline] def buildPlanAndManifest (benches : Array Bench) (cfg : CliConfig) :
+    IO (PlanCore × String × RunManifest) := do
+  let core := planCoreOf benches cfg
+  let coreJson := renderPlanCoreJson core
+  let planHash := hashStringHex coreJson
+  let manifest ← buildManifest planHash benches.size cfg.partition
+  return (core, planHash, manifest)
+
 @[inline] def runWithConfig (cfg : CliConfig) : IO UInt32 := do
+  let cfg ← applyArtifacts cfg
   let benches ← listBenches
   let suitePred? ← resolveSuiteFilter cfg.filterSuite
   let benches := benches.filter (fun b => shouldKeep b cfg suitePred?)
@@ -637,11 +884,10 @@ structure BenchResult where
       for b in benches do
         IO.println b.name
     return (0 : UInt32)
+  if (cfg.failOnRegressions || hasRegressionThresholds cfg) && cfg.comparePath.isNone then
+    throw <| IO.userError "regression checks require --compare"
   if cfg.planOnly then
-    let core := planCoreOf benches cfg
-    let coreJson := renderPlanCoreJson core
-    let planHash := hashStringHex coreJson
-    let manifest ← buildManifest planHash benches.size cfg.partition
+    let (core, _, manifest) ← buildPlanAndManifest benches cfg
     let planJson := renderPlanJson core manifest
     writeOutput planJson cfg.planOut
     if let some path := cfg.manifestOut then
@@ -650,12 +896,16 @@ structure BenchResult where
   if benches.size == 0 then
     IO.eprintln "no benchmarks registered"
     return (1 : UInt32)
-  if let some path := cfg.manifestOut then
-    let core := planCoreOf benches cfg
-    let coreJson := renderPlanCoreJson core
-    let planHash := hashStringHex coreJson
-    let manifest ← buildManifest planHash benches.size cfg.partition
-    writeOutput (renderManifestJson manifest) (some path)
+  let needManifest := cfg.manifestOut.isSome || cfg.format == .json || cfg.format == .jsonl
+  let mut runMetaJson? : Option String := none
+  if needManifest then
+    let (_, _, manifest) ← buildPlanAndManifest benches cfg
+    if let some path := cfg.manifestOut then
+      writeOutput (renderManifestJson manifest) (some path)
+    if cfg.format == .json || cfg.format == .jsonl then
+      let manifestJson := renderManifestJson manifest
+      let manifestHash := hashStringHex manifestJson
+      runMetaJson? := some (renderRunMetaJson manifest manifestHash cfg.args)
   let mut results : Array BenchResult := #[]
   for b in benches do
     unless cfg.quiet do
@@ -667,27 +917,42 @@ structure BenchResult where
     match cfg.comparePath with
     | none => pure none
     | some path => some <$> loadBaseline path
+  let regressions :=
+    match baseline? with
+    | none => #[]
+    | some baseline => collectRegressions results baseline cfg
+  let exitCode : UInt32 :=
+    if cfg.failOnRegressions && !regressions.isEmpty then 1 else 0
   match cfg.format with
   | .pretty =>
       let output := renderPrettyWithBaseline results baseline? false cfg.groupBySuite
       IO.println output
-      return (0 : UInt32)
+      let summary := renderRegressionSummary regressions cfg
+      if summary != "" then
+        IO.println summary
   | .prettyFull =>
       let output := renderPrettyWithBaseline results baseline? true cfg.groupBySuite
       IO.println output
-      return (0 : UInt32)
+      let summary := renderRegressionSummary regressions cfg
+      if summary != "" then
+        IO.println summary
   | .json =>
-      let output := renderJson results
-      match cfg.jsonOut with
-      | some path => IO.FS.writeFile path output
-      | none => IO.println output
-      return (0 : UInt32)
+      match runMetaJson? with
+      | none => throw <| IO.userError "missing run metadata for JSON output"
+      | some runMetaJson =>
+          let output := renderRunResultsJson results runMetaJson
+          writeOutput output cfg.jsonOut
+  | .jsonl =>
+      match runMetaJson? with
+      | none => throw <| IO.userError "missing run metadata for JSONL output"
+      | some runMetaJson =>
+          writeRunResultJsonLines results runMetaJson cfg.jsonlOut
   | .radar =>
       let radarSuite ← radarSuiteFromEnv cfg
       let lines := renderRadarLines results radarSuite
       let outPath ← radarOutPath cfg
       writeLines lines outPath
-      return (0 : UInt32)
+  return exitCode
 
 @[inline] def runLeanbenchCmd (p : Cli.Parsed) : IO UInt32 := do
   try
@@ -700,7 +965,7 @@ structure BenchResult where
 open Cli
 
 def leanbenchCmd : Cmd := `[Cli|
-  leanbench VIA runLeanbenchCmd; ["0.1.0"] "LeanBench benchmark runner."
+  leanbench VIA runLeanbenchCmd; [leanbenchVersion] "LeanBench benchmark runner."
   FLAGS:
     list; "List available benchmarks."
     "list-tags"; "List tags (respects filters)."
@@ -719,15 +984,22 @@ def leanbenchCmd : Cmd := `[Cli|
     "plan-out" : String; "Write plan JSON to file."
     "manifest-out" : String; "Write run manifest JSON to file."
     "group-by" : String; "Group output by: suite."
-    format : String; "Output format: pretty|full|json|radar."
+    format : String; "Output format: pretty|full|json|jsonl|radar."
     json; "Alias for --format json."
+    jsonl; "Alias for --format jsonl."
     radar; "Alias for --format radar."
     "suite" : String; "Only run benchmarks in this suite."
     "radar-suite" : String; "Prefix radar names with <suite>//."
     "radar-out" : String; "Write radar JSONL to file (defaults to RADAR_JSONL)."
     "json-out" : String; "Write JSON output to file."
+    "jsonl-out" : String; "Write JSONL output to file."
+    artifacts : String; "Write outputs under this directory."
     compare : String; "Compare against a JSON baseline."
     save : String; "Write JSON output to file and set format=json."
+    "fail-on-regressions"; "Exit non-zero if regressions exceed thresholds."
+    "regress-abs-ns" : Nat; "Fail if mean_ns regression exceeds N nanoseconds."
+    "regress-ratio" : String; "Fail if mean_ns regression ratio exceeds this value."
+    "regress-pct" : String; "Fail if mean_ns regression exceeds this percent."
     quiet; "Suppress per-benchmark progress."
 ]
 

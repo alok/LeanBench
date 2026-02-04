@@ -103,7 +103,7 @@ initialize fixturesRef : IO.Ref BenchFixtures <- IO.mkRef buildFixtures
 
 def escapeBytes : Nat := fixturesForConfig.escapeInput.length
 def prettyBytes : Nat := (renderPrettyTable fixturesForConfig.results none false).length
-def jsonBytes : Nat := (renderJson fixturesForConfig.results).length
+def jsonBytes : Nat := (renderResultsJson fixturesForConfig.results).length
 def planBytes : Nat := (renderPlanCoreJson fixturesForConfig.planCore).length
 def scanItems : Nat := fixturesForConfig.scanLines.length
 def scanBytes : Nat := fixturesForConfig.scanLines.foldl (fun acc line => acc + line.length) 0
@@ -183,7 +183,7 @@ bench "leanbench/render_pretty_500" (cfgPretty) do
 
 bench "leanbench/render_json_500" (cfgJsonRender) do
   let fixtures ← fixturesRef.get
-  let out := renderJson fixtures.results
+  let out := renderResultsJson fixtures.results
   if out.length == 0 then
     IO.println ""
 
