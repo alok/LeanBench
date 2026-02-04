@@ -66,20 +66,75 @@ benchDriver = "LeanBench/leanbench"
 - `--samples <n>` override sample count
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
+- `--threads <n>` run each sample with N parallel action tasks
 - `--seed <n>` seed for deterministic shuffling
 - `--shuffle` shuffle bench order deterministically
 - `--partition count:m/n|hash:m/n` shard benches across workers
 - `--plan-out <path>` write plan JSON to file
 - `--manifest-out <path>` write run manifest JSON to file
 - `--group-by suite` group pretty output by suite
-- `--format pretty|full|json|radar` (`full` adds median/p95/p99)
+- `--format pretty|full|json|jsonl|radar` (`full` adds median/p95/p99)
 - `--json` alias for `--format json`
+- `--jsonl` alias for `--format jsonl`
 - `--radar` alias for `--format radar`
 - `--radar-suite <name>` prefix radar names with `<name>//` (or set `LEANBENCH_RADAR_SUITE`)
-- `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL
+- `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL compatible with https://github.com/leanprover/radar
 - `--json-out <path>` write JSON to file
+- `--jsonl-out <path>` write JSONL to file
+- `--artifacts <dir>` write outputs under this directory
 - `--save <path>` write JSON to file and set format to json
 - `--compare <path>` compare against a JSON baseline
+- `--fail-on-regressions` exit non-zero when regressions exceed thresholds
+- `--regress-abs-ns <n>` fail if mean_ns regression exceeds N nanoseconds
+- `--regress-ratio <x>` fail if mean_ns ratio exceeds this value (e.g., 1.05)
+- `--regress-pct <p>` fail if mean_ns regression exceeds this percent (e.g., 5)
+
+## JSON output
+
+`--format json` emits a schema-versioned object with `schema_version`, `run`, and
+`results`. The schema lives at `docs/leanbench-schema.json`. `--format jsonl`
+emits one JSON object per benchmark result (including run metadata).
+
+Baselines used by `--compare` can be either the legacy JSON array or the new
+schema object.
+
+## Radar integration
+
+If you use `github.com/leanprover/radar`, you can point a bench script at
+`scripts/radar/leanbench.sh`. It follows the radar bench script contract
+(`$1` repo path, `$2` JSONL output path) and forwards any extra args to
+`lake exe leanbench`.
+
+```bash
+# Example: run a suite with 5 samples and emit radar JSONL.
+LEANBENCH_ARGS="--suite core --samples 5" \
+  ./scripts/radar/leanbench.sh /path/to/LeanBench /tmp/radar.jsonl
+```
+
+Example radar configs live in `radar/` (copy `.example.yaml` files and edit tokens/URLs).
+
+## Observe benches
+
+The `observe` suite runs small end-to-end LeanObserve passes over `benchdata/`.
+These are intended for perf regression tracking of infotree and command-node
+collection.
+
+```bash
+lake exe leanbench --suite observe
+```
+
+The observe benches import `LeanObserve` directly (no subprocess), so they
+exercise the in-process API as well as the CLI.
+
+LeanObserve CLI:
+- `--command-nodes` includes all commands (including non-decls).
+- `--decl-nodes` includes only named declarations (implies `--command-nodes`).
+- `leanobserve` reads `observatory.toml` or `leanbench.toml` from the current directory.
+- Select a profile with `--profile` or `LEANOBSERVATORY_PROFILE` (default: `default`).
+- Apply tool overrides with `--tool` or `LEANOBSERVATORY_TOOL`.
+- Use `--config` to point at a specific config file and `--print-config` to show the resolved config.
+- Precedence: CLI > env vars > tool overrides > profile > defaults.
+- Example config: `observatory.toml.example`.
 
 ## Suites
 
@@ -93,6 +148,57 @@ bench_suite "text" ({
   description := "string + json benches"
   tags := ["string", "json"]
 })
+```
+
+## GPU metrics
+
+Provide per-iteration byte and flop counts in `BenchConfig` to emit
+bandwidth (GB/s) and throughput (GFLOP/s) in pretty/JSON output:
+
+```lean
+import LeanBench
+
+def cfg : BenchConfig := {
+  threads := 8                -- run in parallel
+  bytes := some (3 * 1_000_000 * 4)  -- bytes per iteration
+  flops := some 1_000_000           -- flops per iteration
+}
+
+bench "vector_add" (cfg) do
+  -- run kernel
+  pure ()
+```
+
+## Item throughput
+
+Provide per-iteration item counts to emit `items/s`:
+
+```lean
+import LeanBench
+
+def cfg : BenchConfig := {
+  items := some 1024 -- items per iteration
+}
+
+bench "batch_next" (cfg) do
+  -- run one batch
+  pure ()
+```
+
+## Extras
+
+Attach additional JSON metrics (e.g., stage timing) with `bench_report`:
+
+```lean
+import LeanBench
+import Lean.Data.Json
+
+def reportStats : IO Lean.Json := do
+  pure <| Lean.Json.mkObj [("stage_wait_ns", Lean.Json.num 12345)]
+
+bench_report "pipeline" (reportStats) do
+  -- run one pipeline step
+  pure ()
 ```
 
 ## Lake integration

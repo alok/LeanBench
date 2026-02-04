@@ -1,0 +1,43 @@
+logging:
+  level: INFO
+  loggers:
+    org.leanlang.radar: DEBUG
+
+jerseyClient:
+  gzipEnabledForRequests: false
+  timeout: 5s
+
+adminToken: change-me
+
+server:
+  applicationConnectors:
+    - type: http
+      port: 8080
+  adminConnectors:
+    - type: http
+      port: 8081
+  requestLog:
+    appenders: [ ]
+
+url: http://localhost:8080/
+
+repos:
+  - name: leanbench
+    description: LeanBench benchmarks
+    url: https://github.com/alok/LeanBench
+    ref: main
+    benchUrl: https://github.com/alok/LeanBench
+    benchRef: main
+    benchRuns:
+      - name: leanbench
+        script: scripts/radar/leanbench.sh
+        runner: local
+    significantMetrics:
+      - direction: -1
+        checkQuantileFactorSmall: 3
+        checkQuantileFactorMedium: 6
+        checkQuantileFactorLarge: 9
+
+runners:
+  - name: local
+    token: localtoken

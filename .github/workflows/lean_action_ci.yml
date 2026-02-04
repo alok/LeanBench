@@ -14,3 +14,22 @@ jobs:
       - uses: leanprover/lean-action@v1
       - name: Sanity check CLI
         run: lake exe leanbench --list
+      - name: Baseline bench (single)
+        run: >
+          lake exe leanbench
+          --suite leanbench
+          --match render_json_500
+          --samples 5
+          --warmup 1
+          --save artifacts/baseline.json
+          --artifacts artifacts
+      - name: Regression check (single)
+        run: >
+          lake exe leanbench
+          --suite leanbench
+          --match render_json_500
+          --samples 5
+          --warmup 1
+          --compare artifacts/baseline.json
+          --fail-on-regressions
+          --regress-pct 10

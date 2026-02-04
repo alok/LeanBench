@@ -1,7 +1,15 @@
 name = "LeanBench"
-version = "0.1.0"
+version = "0.1.1"
 defaultTargets = ["leanbench"]
 benchDriver = "leanbench"
+[leanOptions]
+pp.unicode.fun = true
+autoImplicit = true
+# prevent confusing the AI with missing identifiers misidentified as implicit arguments
+relaxedAutoImplicit = false
+linter.missingDocs = true
+doc.verso = true
+
 
 [[require]]
 name = "Cli"
@@ -11,6 +19,17 @@ rev = "main"
 [[lean_lib]]
 name = "LeanBench"
 
+[[lean_lib]]
+name = "LeanObserve"
+
 [[lean_exe]]
 name = "leanbench"
 root = "Main"
+
+[[lean_exe]]
+name = "leanobserve"
+root = "LeanObserve.Main"
+
+[[lean_exe]]
+name = "visualizer-gen"
+root = "LeanObserve.VisualizerGen"

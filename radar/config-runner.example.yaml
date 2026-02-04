@@ -1,0 +1,8 @@
+logging:
+  level: INFO
+  loggers:
+    org.leanlang.radar: DEBUG
+
+name: "local"
+url: "http://localhost:8080/api/"
+token: "localtoken"

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LeanBench Results",
+  "type": "object",
+  "required": ["schema_version", "run", "results"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "run": {"$ref": "#/$defs/run"},
+    "results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/result"}
+    }
+  },
+  "$defs": {
+    "partition": {
+      "type": ["object", "null"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["count", "hash"]},
+        "index": {"type": "integer"},
+        "count": {"type": "integer"}
+      },
+      "required": ["kind", "index", "count"]
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "tool",
+        "version",
+        "plan_hash",
+        "manifest_hash",
+        "bench_count",
+        "os",
+        "lean_version",
+        "generated_epoch_sec",
+        "args"
+      ],
+      "properties": {
+        "tool": {"type": "string"},
+        "version": {"type": "string"},
+        "plan_hash": {"type": "string"},
+        "manifest_hash": {"type": "string"},
+        "bench_count": {"type": "integer"},
+        "partition": {"$ref": "#/$defs/partition"},
+        "os": {"type": "string"},
+        "arch": {"type": ["string", "null"]},
+        "lean_version": {"type": "string"},
+        "lake_version": {"type": ["string", "null"]},
+        "git_sha": {"type": ["string", "null"]},
+        "generated_epoch_sec": {"type": ["string", "null"]},
+        "args": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "name",
+        "mean_ns",
+        "stddev_ns",
+        "min_ns",
+        "max_ns",
+        "median_ns",
+        "p95_ns",
+        "p99_ns",
+        "samples",
+        "total_ns",
+        "bandwidth_gbps",
+        "throughput_gflops",
+        "items_per_s",
+        "extras"
+      ],
+      "properties": {
+        "name": {"type": "string"},
+        "mean_ns": {"type": "number"},
+        "stddev_ns": {"type": "number"},
+        "min_ns": {"type": "integer"},
+        "max_ns": {"type": "integer"},
+        "median_ns": {"type": "integer"},
+        "p95_ns": {"type": "integer"},
+        "p99_ns": {"type": "integer"},
+        "samples": {"type": "integer"},
+        "total_ns": {"type": "integer"},
+        "bandwidth_gbps": {"type": ["number", "null"]},
+        "throughput_gflops": {"type": ["number", "null"]},
+        "items_per_s": {"type": ["number", "null"]},
+        "extras": {}
+      }
+    }
+  }
+}

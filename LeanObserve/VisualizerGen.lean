@@ -1,0 +1,1001 @@
+import Std
+import Lean
+
+structure LegendItem where
+  key : String
+  label : String
+  color : String
+
+def allocLegendItems : Array LegendItem :=
+  #[ { key := "alloc", label := "Alloc", color := "#81c784" }
+   , { key := "free", label := "Free", color := "#ef5350" }
+   , { key := "realloc", label := "Realloc", color := "#ffb74d" }
+   , { key := "transfer_h2d", label := "H2D", color := "#4fc3f7" }
+   , { key := "transfer_d2h", label := "D2H", color := "#ba68c8" }
+   , { key := "transfer_d2d", label := "D2D", color := "#4db6ac" }
+   ]
+
+structure ViewTab where
+  key : String
+  label : String
+  active : Bool := false
+
+def viewTabs : Array ViewTab :=
+  #[ { key := "treemap", label := "Treemap", active := true }
+   , { key := "timeline", label := "Timeline" }
+   , { key := "allocs", label := "Allocs" }
+   ]
+
+structure CategoryButton where
+  key : String
+  label : String
+  active : Bool := false
+
+def categoryButtons : Array CategoryButton :=
+  #[ { key := "all", label := "All", active := true }
+   , { key := "compile", label := "Compile" }
+   , { key := "runtime", label := "Runtime" }
+   ]
+
+structure UiControl where
+  id : String
+  label : String
+  slot : String
+  kind : String
+  placeholder? : Option String := none
+  accept? : Option String := none
+  checked? : Option Bool := none
+  min? : Option Nat := none
+  max? : Option Nat := none
+  step? : Option Nat := none
+  value? : Option Nat := none
+
+def controls : Array UiControl :=
+  #[ { id := "fileInput", label := "Metrics JSON", slot := "topbar", kind := "file", accept? := some "application/json" }
+   , { id := "rootInput", label := "Root Path (for editor links)", slot := "topbar", kind := "text", placeholder? := some "/abs/path/to/project" }
+   , { id := "categoryToggle", label := "Metric Category", slot := "topbar", kind := "button-group" }
+   , { id := "sizeSelect", label := "Size Metric", slot := "topbar", kind := "select" }
+   , { id := "colorSelect", label := "Color Metric", slot := "topbar", kind := "select" }
+   , { id := "showLabels", label := "Show labels", slot := "topbar", kind := "toggle" }
+   , { id := "timelineColorBy", label := "Color By", slot := "timeline", kind := "select" }
+   , { id := "allocsGroupBy", label := "Group By", slot := "allocs", kind := "select" }
+   , { id := "listSelect", label := "List Metric", slot := "inspector", kind := "select" }
+   , { id := "listCount", label := "Count", slot := "inspector", kind := "number", min? := some 5, max? := some 200, value? := some 30 }
+   ]
+
+structure MetricGroup where
+  key : String
+  label : String
+  order : Nat
+  category : String
+
+def metricGroups : Array MetricGroup :=
+  #[ { key := "textscan", label := "Compile-time (Text)", order := 0, category := "compile" }
+   , { key := "infotree", label := "Compile-time (Semantic)", order := 1, category := "compile" }
+   , { key := "profiler", label := "Compile-time (Profiler)", order := 2, category := "compile" }
+   , { key := "cpu", label := "Runtime: CPU", order := 3, category := "runtime" }
+   , { key := "gpu", label := "Runtime: GPU", order := 4, category := "runtime" }
+   , { key := "memory", label := "Runtime: Memory", order := 5, category := "runtime" }
+   , { key := "ffi", label := "Runtime: FFI", order := 6, category := "runtime" }
+   , { key := "other", label := "Other", order := 99, category := "all" }
+   ]
+
+def timelineColorOptions : Array (String × String) :=
+  #[ ("kernel", "Kernel Name")
+   , ("stream", "Stream")
+   , ("duration", "Duration")
+   ]
+
+def allocsGroupOptions : Array (String × String) :=
+  #[ ("time", "Time")
+   , ("file", "File")
+   , ("decl", "Declaration")
+   ]
+
+def joinLines (lines : Array String) : String :=
+  String.intercalate "\n" lines.toList
+
+def renderViewTabs : String :=
+  viewTabs
+    |>.map (fun tab =>
+      let activeClass := if tab.active then " active" else ""
+      s!"          <button class=\"view-tab{activeClass}\" data-view=\"{tab.key}\">{tab.label}</button>")
+    |> joinLines
+
+def renderCategoryButtons : String :=
+  categoryButtons
+    |>.map (fun btn =>
+      let activeClass := if btn.active then " active" else ""
+      s!"            <button class=\"category-btn{activeClass}\" data-category=\"{btn.key}\">{btn.label}</button>")
+    |> joinLines
+
+def renderTimelineOptions : String :=
+  timelineColorOptions
+    |>.map (fun (key, label) =>
+      s!"                <option value=\"{key}\">{label}</option>")
+    |> joinLines
+
+def renderAllocsGroupOptions : String :=
+  allocsGroupOptions
+    |>.map (fun (key, label) =>
+      s!"                <option value=\"{key}\">{label}</option>")
+    |> joinLines
+
+def renderLegendItems : String :=
+  allocLegendItems
+    |>.map (fun item =>
+      s!"              <div class=\"legend-item\" data-event=\"{item.key}\">\n                <span class=\"legend-swatch {item.key}\"></span>\n                {item.label}\n              </div>")
+    |> joinLines
+
+def renderAllocEventCssFor (item : LegendItem) : String :=
+  ".alloc-event." ++ item.key ++ " {\n  fill: " ++ item.color ++ ";\n}\n\n" ++
+  ".legend-swatch." ++ item.key ++ " {\n  background: " ++ item.color ++ ";\n}"
+
+def renderAllocEventCss : String :=
+  allocLegendItems
+    |>.map renderAllocEventCssFor
+    |> joinLines
+
+def replaceAll (needle repl s : String) : String :=
+  String.intercalate repl (s.splitOn needle)
+
+def indexTemplate : String := r###"<!-- Generated by lake exe visualizer-gen; edit LeanObserve/VisualizerGen.lean instead. -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lean Observatory — Treemap</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="badge">Lean Observatory</div>
+        <div class="title">Metrics Explorer</div>
+        <nav class="view-tabs" id="viewTabs"></nav>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="blend-panel" id="blendPanel" hidden>
+        <div class="blend-title">Blend Weights</div>
+        <div class="blend-list" id="blendList"></div>
+      </div>
+    </header>
+
+    <main class="panel">
+      <!-- Treemap View -->
+      <section class="canvas view-container" id="treemapView">
+        <div id="treemap"></div>
+        <div id="tooltip" class="tooltip" hidden></div>
+      </section>
+
+      <!-- Timeline View (GPU kernel Gantt chart) -->
+      <section class="canvas view-container" id="timelineView" hidden>
+        <div class="timeline-header">
+          <h3>GPU Kernel Timeline</h3>
+          <div class="timeline-controls" id="timelineControls"></div>
+        </div>
+        <div id="timeline"></div>
+      </section>
+
+      <!-- Allocs View (Memory waterfall) -->
+      <section class="canvas view-container" id="allocsView" hidden>
+        <div class="allocs-header">
+          <h3 id="allocsTitle">Memory Allocations</h3>
+          <div class="allocs-controls">
+            <div class="allocs-controls-main" id="allocsControls"></div>
+            <div class="allocs-legend" id="allocsLegend"></div>
+          </div>
+        </div>
+        <div id="allocs"></div>
+      </section>
+      <aside class="inspector">
+        <div class="inspector-card">
+          <div class="inspector-title">Top Nodes</div>
+          <div class="inspector-controls" id="inspectorControls"></div>
+          <div id="topList" class="top-list"></div>
+        </div>
+        <div class="inspector-card">
+          <div class="inspector-title">Details</div>
+          <div id="detailBody" class="detail-body">Hover a tile to inspect metrics.</div>
+        </div>
+        <div class="inspector-card" id="systemCard" hidden>
+          <div class="inspector-title">System</div>
+          <div id="systemInfo" class="system-info"></div>
+        </div>
+      </aside>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
+"###
+
+def stylesTemplate : String := r###"/* Generated by lake exe visualizer-gen; edit LeanObserve/VisualizerGen.lean instead. */
+:root {
+  --bg: #0f1419;
+  --panel: #141c24;
+  --panel-2: #1d2733;
+  --accent: #ff7a59;
+  --accent-2: #4bd5ff;
+  --text: #e7edf3;
+  --muted: #9eb1c1;
+  --border: #2a3a4a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: radial-gradient(1200px 800px at 10% -10%, #263043 0%, transparent 60%),
+    radial-gradient(900px 700px at 90% 10%, #1b2735 0%, transparent 55%),
+    var(--bg);
+  min-height: 100vh;
+}
+
+.topbar {
+  display: grid;
+  gap: 16px;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(20, 28, 36, 0.9), rgba(15, 20, 25, 0.95));
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* View tabs */
+.view-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 24px;
+}
+
+.view-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-tab:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.view-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* View containers */
+.view-container {
+  position: relative;
+}
+
+/* Category toggle */
+.category-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.category-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.category-btn:hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+
+.category-btn.active {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
+}
+
+.badge {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+}
+
+.title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.blend-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(20, 28, 36, 0.85);
+}
+
+.blend-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.blend-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.blend-item {
+  display: grid;
+  gap: 6px;
+}
+
+.blend-item label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.blend-item .blend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.blend-item input[type="range"] {
+  flex: 1;
+}
+
+.blend-value {
+  font-size: 11px;
+  color: var(--accent-2);
+  min-width: 36px;
+  text-align: right;
+}
+
+.control {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.control input,
+.control select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.control.toggle {
+  align-content: center;
+  grid-auto-flow: column;
+  justify-content: start;
+}
+
+.control.toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.panel {
+  padding: 24px 32px 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+.canvas {
+  position: relative;
+}
+
+#treemap {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  min-height: 65vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.inspector {
+  display: grid;
+  gap: 16px;
+}
+
+.inspector-card {
+  background: rgba(20, 28, 36, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 14px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.inspector-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inspector-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.top-list {
+  display: grid;
+  gap: 8px;
+  max-height: 48vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.top-item {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(29, 39, 51, 0.8);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border 0.15s ease, transform 0.15s ease;
+}
+
+.top-item:hover {
+  border-color: rgba(255, 122, 89, 0.6);
+  transform: translateY(-1px);
+}
+
+.top-rank {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.top-name {
+  font-size: 13px;
+}
+
+.top-path {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.top-value {
+  font-size: 12px;
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+
+.detail-body {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.detail-path {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.system-info {
+  display: grid;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.system-section {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(29, 39, 51, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.system-heading {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.system-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.system-row span:last-child {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.system-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.detail-metrics {
+  display: grid;
+  gap: 6px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.detail-row span {
+  color: var(--muted);
+}
+
+.tooltip {
+  position: fixed;
+  background: rgba(15, 20, 25, 0.95);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  pointer-events: none;
+  max-width: 360px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.tile {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1px;
+}
+
+.label {
+  font-size: 11px;
+  fill: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+}
+
+/* Timeline view */
+.timeline-header,
+.allocs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-header h3,
+.allocs-header h3 {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+.timeline-controls,
+.allocs-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.allocs-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+#timeline,
+#allocs {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  min-height: 60vh;
+  position: relative;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+/* Gantt chart bars */
+.kernel-bar {
+  rx: 4;
+  cursor: pointer;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1px;
+  transition: opacity 0.15s ease;
+}
+
+.kernel-bar:hover {
+  opacity: 0.8;
+}
+
+/* Memory chart */
+.alloc-line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.alloc-area {
+  opacity: 0.3;
+}
+
+.alloc-event {
+  cursor: pointer;
+}
+
+.alloc-bar {
+  transition: opacity 0.15s ease;
+}
+
+.alloc-bar:hover {
+  opacity: 1;
+}
+
+{{ALLOC_EVENT_CSS}}
+
+/* Optgroup styling for metric selectors */
+.control select optgroup {
+  font-weight: 600;
+  font-style: normal;
+  color: var(--accent);
+  background: var(--panel);
+  padding: 8px 0 4px 0;
+}
+
+.control select option {
+  font-weight: 400;
+  color: var(--text);
+  background: var(--panel-2);
+  padding: 4px 8px;
+}
+
+/* Metric group badges */
+.metric-group-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.metric-group-badge.cpu {
+  background: rgba(75, 213, 255, 0.2);
+  color: var(--accent-2);
+}
+
+.metric-group-badge.gpu {
+  background: rgba(255, 122, 89, 0.2);
+  color: var(--accent);
+}
+
+.metric-group-badge.memory {
+  background: rgba(129, 199, 132, 0.2);
+  color: #81c784;
+}
+
+.metric-group-badge.ffi {
+  background: rgba(186, 104, 200, 0.2);
+  color: #ba68c8;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    padding: 20px;
+  }
+
+  .brand {
+    gap: 12px;
+  }
+
+  .view-tabs {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .panel {
+    padding: 20px;
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-header,
+  .allocs-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .timeline-controls,
+  .allocs-controls {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .allocs-legend {
+    width: 100%;
+  }
+
+  .top-list {
+    max-height: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .blend-list {
+    grid-template-columns: 1fr;
+  }
+
+  .view-tab {
+    flex: 1 1 120px;
+  }
+
+  #treemap,
+  #timeline,
+  #allocs {
+    min-height: 50vh;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    padding: 16px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+
+  .title {
+    font-size: 18px;
+  }
+}
+"###
+
+def renderIndexHtml : String :=
+  indexTemplate
+    |> replaceAll "{{VIEW_TABS}}" renderViewTabs
+    |> replaceAll "{{CATEGORY_BUTTONS}}" renderCategoryButtons
+    |> replaceAll "{{TIMELINE_OPTIONS}}" renderTimelineOptions
+    |> replaceAll "{{ALLOCS_GROUP_OPTIONS}}" renderAllocsGroupOptions
+    |> replaceAll "{{ALLOCS_LEGEND}}" renderLegendItems
+
+def renderStylesCss : String :=
+  stylesTemplate
+    |> replaceAll "{{ALLOC_EVENT_CSS}}" renderAllocEventCss
+
+def legendItemToJson (item : LegendItem) : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("key", Lean.Json.str item.key)
+    , ("label", Lean.Json.str item.label)
+    , ("color", Lean.Json.str item.color)
+    ]
+
+def viewTabToJson (tab : ViewTab) : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("key", Lean.Json.str tab.key)
+    , ("label", Lean.Json.str tab.label)
+    , ("active", Lean.Json.bool tab.active)
+    ]
+
+def categoryButtonToJson (btn : CategoryButton) : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("key", Lean.Json.str btn.key)
+    , ("label", Lean.Json.str btn.label)
+    , ("active", Lean.Json.bool btn.active)
+    ]
+
+def uiControlToJson (control : UiControl) : Lean.Json :=
+  let fields : List (String × Lean.Json) :=
+    [ ("id", Lean.Json.str control.id)
+    , ("label", Lean.Json.str control.label)
+    , ("section", Lean.Json.str control.slot)
+    , ("kind", Lean.Json.str control.kind)
+    ]
+  let fields :=
+    match control.placeholder? with
+    | some placeholder => fields ++ [("placeholder", Lean.Json.str placeholder)]
+    | none => fields
+  let fields :=
+    match control.accept? with
+    | some accept => fields ++ [("accept", Lean.Json.str accept)]
+    | none => fields
+  let fields :=
+    match control.checked? with
+    | some checked => fields ++ [("checked", Lean.Json.bool checked)]
+    | none => fields
+  let fields :=
+    match control.min? with
+    | some value => fields ++ [("min", Lean.Json.num (Lean.JsonNumber.fromNat value))]
+    | none => fields
+  let fields :=
+    match control.max? with
+    | some value => fields ++ [("max", Lean.Json.num (Lean.JsonNumber.fromNat value))]
+    | none => fields
+  let fields :=
+    match control.step? with
+    | some value => fields ++ [("step", Lean.Json.num (Lean.JsonNumber.fromNat value))]
+    | none => fields
+  let fields :=
+    match control.value? with
+    | some value => fields ++ [("value", Lean.Json.num (Lean.JsonNumber.fromNat value))]
+    | none => fields
+  Lean.Json.mkObj fields
+
+def optionToJson (opt : String × String) : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("key", Lean.Json.str opt.fst)
+    , ("label", Lean.Json.str opt.snd)
+    ]
+
+def metricGroupToJson (group : MetricGroup) : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("key", Lean.Json.str group.key)
+    , ("label", Lean.Json.str group.label)
+    , ("order", Lean.Json.num (Lean.JsonNumber.fromNat group.order))
+    , ("category", Lean.Json.str group.category)
+    ]
+
+def uiSpecJson : Lean.Json :=
+  Lean.Json.mkObj
+    [ ("metric_groups", Lean.Json.arr (metricGroups.map metricGroupToJson))
+    , ("controls", Lean.Json.arr (controls.map uiControlToJson))
+    , ("view_tabs", Lean.Json.arr (viewTabs.map viewTabToJson))
+    , ("category_buttons", Lean.Json.arr (categoryButtons.map categoryButtonToJson))
+    , ("timeline_color_options", Lean.Json.arr (timelineColorOptions.map optionToJson))
+    , ("allocs_group_options", Lean.Json.arr (allocsGroupOptions.map optionToJson))
+    , ("alloc_legend", Lean.Json.arr (allocLegendItems.map legendItemToJson))
+    ]
+
+def renderUiSpec : String :=
+  toString uiSpecJson
+
+def ensureDir (path : System.FilePath) : IO Unit := do
+  if !(← path.pathExists) then
+    IO.FS.createDirAll path
+
+def writeIfChanged (path : System.FilePath) (content : String) : IO Bool := do
+  let existing ← try
+    IO.FS.readFile path
+  catch _ =>
+    pure ""
+  if existing == content then
+    return false
+  IO.FS.writeFile path content
+  return true
+
+def findRoot? (args : List String) : Option String :=
+  match args with
+  | [] => none
+  | "--root" :: value :: _ => some value
+  | _ :: rest => findRoot? rest
+
+def shouldCheckOnly (args : List String) : Bool :=
+  args.any (fun arg => arg == "--check")
+
+def main (args : List String) : IO UInt32 := do
+  let rootPath := System.FilePath.mk (findRoot? args |>.getD ".")
+  let visualizerDir := rootPath / "visualizer"
+  let indexPath := visualizerDir / "index.html"
+  let stylesPath := visualizerDir / "styles.css"
+  let uiSpecPath := visualizerDir / "ui-spec.json"
+  let checkOnly := shouldCheckOnly args
+  let indexContent := renderIndexHtml
+  let stylesContent := renderStylesCss
+  let uiSpecContent := renderUiSpec
+  if checkOnly then
+    let indexOk ← try
+      IO.FS.readFile indexPath
+    catch _ =>
+      pure ""
+    let stylesOk ← try
+      IO.FS.readFile stylesPath
+    catch _ =>
+      pure ""
+    let uiSpecOk ← try
+      IO.FS.readFile uiSpecPath
+    catch _ =>
+      pure ""
+    let ok := indexOk == indexContent && stylesOk == stylesContent && uiSpecOk == uiSpecContent
+    if ok then
+      IO.println "visualizer-gen: files up to date"
+      return 0
+    IO.eprintln "visualizer-gen: files out of date"
+    return 1
+  ensureDir visualizerDir
+  let indexChanged ← writeIfChanged indexPath indexContent
+  let stylesChanged ← writeIfChanged stylesPath stylesContent
+  let uiSpecChanged ← writeIfChanged uiSpecPath uiSpecContent
+  if indexChanged || stylesChanged || uiSpecChanged then
+    IO.println "visualizer-gen: updated visualizer/index.html, visualizer/styles.css, visualizer/ui-spec.json"
+  else
+    IO.println "visualizer-gen: no changes"
+  return 0
