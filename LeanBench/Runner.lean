@@ -69,6 +69,9 @@ structure BenchResult where
   stats : BenchStats
   samples : Array Nat
   extras : Option Lean.Json := none
+  trace : Option Lean.Json := none
+  tracePath : Option System.FilePath := none
+  sampleExtrasPath : Option System.FilePath := none
 
 structure Regression where
   name : String
@@ -221,9 +224,32 @@ structure Regression where
 @[inline] def scaledUnits (cfg : BenchConfig) (units : Nat) : Nat :=
   units * effectiveThreads cfg
 
+@[inline] def isAsciiAlphaNum (c : Char) : Bool :=
+  ('a' <= c && c <= 'z') ||
+  ('A' <= c && c <= 'Z') ||
+  ('0' <= c && c <= '9')
+
+@[inline] def safeBenchFileStem (benchId : String) : String := Id.run do
+  let mut chars : Array Char := #[]
+  for c in benchId.toList do
+    if isAsciiAlphaNum c || c == '-' || c == '_' || c == '.' then
+      chars := chars.push c
+    else if c == '/' || c == '\\' then
+      chars := chars.push '_'
+      chars := chars.push '_'
+    else
+      chars := chars.push '_'
+  let out := String.ofList chars.toList
+  if out.length == 0 then "bench" else out
+
+@[inline] def jsonNatArray (xs : Array Nat) : String :=
+  "[" ++ String.intercalate "," (xs.toList.map toString) ++ "]"
+
 @[inline] def runBench (entry : Bench) (cli : CliConfig) : IO BenchResult := do
   let cfg := applyOverrides entry.config cli
   let threads := effectiveThreads cfg
+  let id := benchId entry
+  let stem := safeBenchFileStem id
   let runOnce : IO Unit := do
     if threads <= 1 then
       entry.action
@@ -233,24 +259,102 @@ structure Regression where
         tasks := tasks.push (← IO.asTask (prio := .dedicated) entry.action)
       for t in tasks do
         let _ ← IO.wait t
-  for _ in [0:cfg.warmup] do
-    runOnce
-  let minTimeNs := cfg.minTimeMs * nsPerMs
-  let mut samples : Array Nat := #[]
-  let mut total : Nat := 0
-  while samples.size < cfg.samples || (minTimeNs > 0 && total < minTimeNs) do
-    let start ← IO.monoNanosNow
-    runOnce
-    let stop ← IO.monoNanosNow
-    let elapsed := stop - start
-    samples := samples.push elapsed
-    total := total + elapsed
-  let stats := statsOf samples
-  let extras ←
-    match entry.report? with
-    | none => pure none
-    | some report => some <$> report
-  pure { entry := entry, config := cfg, stats := stats, samples := samples, extras := extras }
+  if let some setup := entry.setup? then
+    setup
+  try
+    for _ in [0:cfg.warmup] do
+      if let some beforeEach := entry.beforeEach? then
+        beforeEach
+      runOnce
+      if let some afterEach := entry.afterEach? then
+        afterEach
+
+    let minTimeNs := cfg.minTimeMs * nsPerMs
+    let mut samples : Array Nat := #[]
+    let mut sampleExtras : Array Lean.Json := #[]
+    let mut total : Nat := 0
+    while samples.size < cfg.samples || (minTimeNs > 0 && total < minTimeNs) do
+      if let some beforeEach := entry.beforeEach? then
+        beforeEach
+      let start ← IO.monoNanosNow
+      runOnce
+      let stop ← IO.monoNanosNow
+      if let some afterEach := entry.afterEach? then
+        afterEach
+      let elapsed := stop - start
+      let sampleIndex := samples.size
+      samples := samples.push elapsed
+      total := total + elapsed
+      match entry.reportSample? with
+      | none => pure ()
+      | some reportSample =>
+          match cli.artifactsDir with
+          | none => pure ()
+          | some _ =>
+              let ctx : SampleCtx := {
+                benchName := entry.name
+                benchId := id
+                suite := cfg.suite
+                tags := cfg.tags
+                config := cfg
+                sampleIndex := sampleIndex
+                elapsedNs := elapsed
+                threads := threads
+              }
+              sampleExtras := sampleExtras.push (← reportSample ctx)
+
+    let stats := statsOf samples
+    let extras ←
+      match entry.report? with
+      | none => pure none
+      | some report => some <$> report
+
+    let sampleExtrasPath? ←
+      match (entry.reportSample?, cli.artifactsDir) with
+      | (some _, some dir) =>
+          let rel : System.FilePath := (System.FilePath.mk "sample_extras") / (stem ++ ".json")
+          let out := dir / rel
+          IO.FS.createDirAll (dir / "sample_extras")
+          let sampleExtrasJson := jsonArray (sampleExtras.map Lean.Json.compress)
+          let content :=
+            "{" ++
+              "\"schema_version\":" ++ toString jsonSchemaVersion ++ "," ++
+              "\"bench_id\":" ++ jsonString id ++ "," ++
+              "\"bench_name\":" ++ jsonString entry.name ++ "," ++
+              "\"samples_ns\":" ++ jsonNatArray samples ++ "," ++
+              "\"sample_extras\":" ++ sampleExtrasJson ++
+            "}"
+          IO.FS.writeFile out content
+          pure (some rel)
+      | _ => pure none
+
+    let (trace?, tracePath?) ←
+      match entry.trace? with
+      | none => pure (none, none)
+      | some report => do
+          let j ← report
+          match cli.artifactsDir with
+          | none => pure (some j, none)
+          | some dir =>
+              let rel : System.FilePath := (System.FilePath.mk "trace") / (stem ++ ".json")
+              let out := dir / rel
+              IO.FS.createDirAll (dir / "trace")
+              IO.FS.writeFile out (Lean.Json.compress j)
+              pure (none, some rel)
+
+    pure ({
+      entry := entry
+      config := cfg
+      stats := stats
+      samples := samples
+      extras := extras
+      trace := trace?
+      tracePath := tracePath?
+      sampleExtrasPath := sampleExtrasPath?
+    } : BenchResult)
+  finally
+    if let some teardown := entry.teardown? then
+      teardown
 
 @[inline] def padRight (s : String) (n : Nat) : String :=
   let len := s.length
@@ -469,6 +573,15 @@ structure Regression where
   let extras := match r.extras with
     | some v => Lean.Json.compress v
     | none => "null"
+  let trace := match r.trace with
+    | some v => Lean.Json.compress v
+    | none => "null"
+  let tracePath := match r.tracePath with
+    | some p => jsonString p.toString
+    | none => "null"
+  let sampleExtrasPath := match r.sampleExtrasPath with
+    | some p => jsonString p.toString
+    | none => "null"
   let fields := #[
     "\"name\":\"" ++ name ++ "\"",
     "\"mean_ns\":" ++ r.stats.meanNs.toString,
@@ -483,7 +596,10 @@ structure Regression where
     "\"bandwidth_gbps\":" ++ bandwidth,
     "\"throughput_gflops\":" ++ gflops,
     "\"items_per_s\":" ++ itemsPerSec,
-    "\"extras\":" ++ extras
+    "\"extras\":" ++ extras,
+    "\"trace\":" ++ trace,
+    "\"trace_path\":" ++ tracePath,
+    "\"sample_extras_path\":" ++ sampleExtrasPath
   ]
   "{" ++ String.intercalate "," fields.toList ++ "}"
 
