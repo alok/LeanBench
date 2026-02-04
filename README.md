@@ -95,6 +95,17 @@ benchDriver = "LeanBench/leanbench"
 `results`. The schema lives at `docs/leanbench-schema.json`. `--format jsonl`
 emits one JSON object per benchmark result (including run metadata).
 
+Each bench result may include:
+- `trace` and/or `trace_path` (structured trace JSON)
+- `sample_extras_path` (per-sample JSON written under `--artifacts`)
+
+By default (no `--artifacts`), traces are inlined as `trace`. When
+`--artifacts <dir>` is set, `trace_path` is set and `trace` is `null`.
+
+When `--artifacts <dir>` is set, trace and per-sample outputs are written under:
+- `<dir>/trace/*.json`
+- `<dir>/sample_extras/*.json`
+
 Baselines used by `--compare` can be either the legacy JSON array or the new
 schema object.
 
@@ -199,6 +210,43 @@ def reportStats : IO Lean.Json := do
 bench_report "pipeline" (reportStats) do
   -- run one pipeline step
   pure ()
+```
+
+## Lifecycle hooks + per-sample reporting
+
+For finer control, `Bench` supports lifecycle hooks that run *outside* the timed
+region:
+- `setup?` / `teardown?` run once per bench run
+- `beforeEach?` / `afterEach?` run around each sample
+
+You can also emit per-sample JSON via `reportSample?`. Per-sample reports are
+written to an artifacts file when `--artifacts <dir>` is set and referenced via
+`sample_extras_path` in JSON output.
+
+```lean
+import LeanBench
+import Lean.Data.Json
+
+open LeanBench
+
+initialize counterRef : IO.Ref Nat <- IO.mkRef 0
+
+def sampleReport (ctx : SampleCtx) : IO Lean.Json := do
+  let n ← counterRef.get
+  pure <| Lean.Json.mkObj [
+    ("sample_index", Lean.Json.num ctx.sampleIndex),
+    ("elapsed_ns", Lean.Json.num ctx.elapsedNs),
+    ("counter", Lean.Json.num n)
+  ]
+
+initialize LeanBench.register {
+  name := "hooked"
+  config := { suite := some "core", samples := 5, warmup := 1 }
+  setup? := some (counterRef.set 0)
+  beforeEach? := some (counterRef.modify (· + 1))
+  action := pure ()
+  reportSample? := some sampleReport
+}
 ```
 
 ## Lake integration
