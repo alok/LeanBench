@@ -73,14 +73,30 @@ benchDriver = "LeanBench/leanbench"
 - `--plan-out <path>` write plan JSON to file
 - `--manifest-out <path>` write run manifest JSON to file
 - `--group-by suite` group pretty output by suite
-- `--format pretty|full|json|radar` (`full` adds median/p95/p99)
+- `--format pretty|full|json|jsonl|radar` (`full` adds median/p95/p99)
 - `--json` alias for `--format json`
+- `--jsonl` alias for `--format jsonl`
 - `--radar` alias for `--format radar`
 - `--radar-suite <name>` prefix radar names with `<name>//` (or set `LEANBENCH_RADAR_SUITE`)
 - `--radar-out <path>` or `RADAR_JSONL=/path` for JSONL compatible with https://github.com/leanprover/radar
 - `--json-out <path>` write JSON to file
+- `--jsonl-out <path>` write JSONL to file
+- `--artifacts <dir>` write outputs under this directory
 - `--save <path>` write JSON to file and set format to json
 - `--compare <path>` compare against a JSON baseline
+- `--fail-on-regressions` exit non-zero when regressions exceed thresholds
+- `--regress-abs-ns <n>` fail if mean_ns regression exceeds N nanoseconds
+- `--regress-ratio <x>` fail if mean_ns ratio exceeds this value (e.g., 1.05)
+- `--regress-pct <p>` fail if mean_ns regression exceeds this percent (e.g., 5)
+
+## JSON output
+
+`--format json` emits a schema-versioned object with `schema_version`, `run`, and
+`results`. The schema lives at `docs/leanbench-schema.json`. `--format jsonl`
+emits one JSON object per benchmark result (including run metadata).
+
+Baselines used by `--compare` can be either the legacy JSON array or the new
+schema object.
 
 ## Radar integration
 
