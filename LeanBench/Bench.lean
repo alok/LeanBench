@@ -16,11 +16,28 @@ structure BenchConfig where
   items : Option Nat := none
   deriving Inhabited
 
+/-- Context for per-sample reporting hooks. -/
+structure SampleCtx where
+  benchName : String
+  benchId : String
+  suite : Option String
+  tags : List String
+  config : BenchConfig
+  sampleIndex : Nat
+  elapsedNs : Nat
+  threads : Nat
+
 structure Bench where
   name : String
   action : IO Unit
   config : BenchConfig := {}
+  setup? : Option (IO Unit) := none
+  teardown? : Option (IO Unit) := none
+  beforeEach? : Option (IO Unit) := none
+  afterEach? : Option (IO Unit) := none
   report? : Option (IO Lean.Json) := none
+  reportSample? : Option (SampleCtx → IO Lean.Json) := none
+  trace? : Option (IO Lean.Json) := none
   deriving Inhabited
 
 initialize benchRegistry : IO.Ref (Array Bench) <- IO.mkRef #[]

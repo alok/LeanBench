@@ -33,3 +33,17 @@ jobs:
           --compare artifacts/baseline.json
           --fail-on-regressions
           --regress-pct 10
+      - name: Hooks/Trace Artifacts Smoke
+        run: >
+          lake exe leanbench
+          --suite leanbench
+          --match hooks_smoke
+          --samples 3
+          --warmup 1
+          --format json
+          --json-out artifacts/hooks_smoke.json
+          --artifacts artifacts
+      - name: Assert Artifacts Exist
+        run: |
+          test -f artifacts/sample_extras/leanbench__leanbench__hooks_smoke.json
+          test -f artifacts/trace/leanbench__leanbench__hooks_smoke.json

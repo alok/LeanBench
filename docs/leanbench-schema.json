@@ -85,7 +85,10 @@
         "bandwidth_gbps": {"type": ["number", "null"]},
         "throughput_gflops": {"type": ["number", "null"]},
         "items_per_s": {"type": ["number", "null"]},
-        "extras": {}
+        "extras": {},
+        "trace": {},
+        "trace_path": {"type": ["string", "null"]},
+        "sample_extras_path": {"type": ["string", "null"]}
       }
     }
   }
