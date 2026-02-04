@@ -223,3 +223,54 @@ bench "leanbench/scan_lines_200_fast" (cfgScanLinesFast) do
   let acc := scanLines fixtures.scanLines
   if acc.loc == 0 then
     IO.println ""
+
+initialize hooksBeforeCountRef : IO.Ref Nat <- IO.mkRef 0
+initialize hooksAfterCountRef : IO.Ref Nat <- IO.mkRef 0
+
+def setupHooks : IO Unit := do
+  hooksBeforeCountRef.set 0
+  hooksAfterCountRef.set 0
+
+def beforeEachHook : IO Unit := do
+  hooksBeforeCountRef.modify (· + 1)
+
+def afterEachHook : IO Unit := do
+  hooksAfterCountRef.modify (· + 1)
+
+def hooksSampleReport (ctx : SampleCtx) : IO Lean.Json := do
+  let beforeCount ← hooksBeforeCountRef.get
+  let afterCount ← hooksAfterCountRef.get
+  pure <| Lean.Json.mkObj [
+    ("sample_index", Lean.Json.num ctx.sampleIndex),
+    ("elapsed_ns", Lean.Json.num ctx.elapsedNs),
+    ("threads", Lean.Json.num ctx.threads),
+    ("before_count", Lean.Json.num beforeCount),
+    ("after_count", Lean.Json.num afterCount)
+  ]
+
+def hooksTraceReport : IO Lean.Json := do
+  let beforeCount ← hooksBeforeCountRef.get
+  let afterCount ← hooksAfterCountRef.get
+  pure <| Lean.Json.mkObj [
+    ("kind", Lean.Json.str "hooks_smoke"),
+    ("before_count", Lean.Json.num beforeCount),
+    ("after_count", Lean.Json.num afterCount)
+  ]
+
+def cfgHooksSmoke : BenchConfig := {
+  suite := some "leanbench"
+  tags := ["leanbench", "internal", "hooks"]
+  samples := 3
+  warmup := 1
+}
+
+initialize LeanBench.register {
+  name := "leanbench/hooks_smoke"
+  action := pure ()
+  config := cfgHooksSmoke
+  setup? := some setupHooks
+  beforeEach? := some beforeEachHook
+  afterEach? := some afterEachHook
+  reportSample? := some hooksSampleReport
+  trace? := some hooksTraceReport
+}
