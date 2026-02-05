@@ -54,6 +54,10 @@ benchDriver = "LeanBench/leanbench"
 
 ## CLI
 
+- `--config <path>` read config from `leanbench.toml`/`observatory.toml`
+- `--profile <name>` select config profile (default: `default`)
+- `--where <expr>` filter benches with a small DSL (`suite(x)`, `tag(y)`, `name(/re/)`, `and/or/not`)
+- `--print-config` print resolved config before running (to stderr)
 - `--list` list benches
 - `--list --format json` machine-readable bench list
 - `--list-tags` list tags (after filters)
@@ -67,6 +71,11 @@ benchDriver = "LeanBench/leanbench"
 - `--warmup <n>` override warmup count
 - `--min-time-ms <n>` run until total time exceeds N ms
 - `--threads <n>` run each sample with N parallel action tasks
+- `--timeout-ms <n>` set timeout metadata (ms)
+- `--retries <n>` retry a failing benchmark up to N times
+- `--priority <n>` set priority metadata
+- `--group <name>` set group metadata
+- `--threads-required <n>` set threads_required metadata
 - `--seed <n>` seed for deterministic shuffling
 - `--shuffle` shuffle bench order deterministically
 - `--partition count:m/n|hash:m/n` shard benches across workers
@@ -88,6 +97,25 @@ benchDriver = "LeanBench/leanbench"
 - `--regress-abs-ns <n>` fail if mean_ns regression exceeds N nanoseconds
 - `--regress-ratio <x>` fail if mean_ns ratio exceeds this value (e.g., 1.05)
 - `--regress-pct <p>` fail if mean_ns regression exceeds this percent (e.g., 5)
+
+## Config file
+
+LeanBench can read `BenchConfig` overrides from a TOML file in the current
+directory:
+
+- `leanbench.toml` (preferred)
+- `observatory.toml` (fallback, so LeanObserve + LeanBench can share profiles)
+
+Use:
+
+- `--config <path>` to point at a specific file
+- `--profile <name>` to select a profile (default: `default`)
+- `--where <expr>` to filter benches using a DSL
+- `--print-config` (or `LEANBENCH_PRINT_CONFIG=1`) to show the resolved config
+
+Config documentation: `docs/leanbench-config.md`.
+
+Example config: `leanbench.toml.example`.
 
 ## JSON output
 

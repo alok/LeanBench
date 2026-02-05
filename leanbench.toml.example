@@ -1,0 +1,38 @@
+# LeanBench config example
+#
+# LeanBench reads `leanbench.toml` (preferred) or `observatory.toml` (fallback)
+# from the current directory. Use `--config` to point at a specific file.
+#
+# Precedence: CLI > env vars > profile overrides > profile > bench defaults.
+#
+# Profiles live under [profile.<name>] and can inherit from one another.
+
+[profile.default]
+warmup = 2
+samples = 10
+min-time-ms = 0
+threads = 1
+retries = 0
+
+# Optional bench selector applied in addition to CLI filters.
+select = "not tag(disabled)"
+
+# Metadata fields (currently not enforced by the runner).
+timeout-ms = 5000
+priority = 0
+group = "local"
+threads-required = 1
+
+[[profile.default.overrides]]
+where = "suite(observe)"
+samples = 3
+warmup = 1
+
+[[profile.default.overrides]]
+where = "name(/json/)"
+group = "json"
+
+[profile.ci]
+inherits = "default"
+samples = 5
+retries = 1
