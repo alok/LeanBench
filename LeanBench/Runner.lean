@@ -7,7 +7,7 @@ import LeanBench.Plan
 
 namespace LeanBench
 
-@[inline] def leanbenchVersion : String := "0.2.0"
+@[inline] def leanbenchVersion : String := "0.2.1"
 @[inline] def jsonSchemaVersion : Nat := 1
 
 inductive OutputFormat where
@@ -259,15 +259,17 @@ structure Regression where
         tasks := tasks.push (← IO.asTask (prio := .dedicated) entry.action)
       for t in tasks do
         let _ ← IO.wait t
-  if let some setup := entry.setup? then
-    setup
   try
+    if let some setup := entry.setup? then
+      setup
     for _ in [0:cfg.warmup] do
       if let some beforeEach := entry.beforeEach? then
         beforeEach
-      runOnce
-      if let some afterEach := entry.afterEach? then
-        afterEach
+      try
+        runOnce
+      finally
+        if let some afterEach := entry.afterEach? then
+          afterEach
 
     let minTimeNs := cfg.minTimeMs * nsPerMs
     let mut samples : Array Nat := #[]
@@ -277,10 +279,13 @@ structure Regression where
       if let some beforeEach := entry.beforeEach? then
         beforeEach
       let start ← IO.monoNanosNow
-      runOnce
-      let stop ← IO.monoNanosNow
-      if let some afterEach := entry.afterEach? then
-        afterEach
+      let stop ←
+        try
+          runOnce
+          IO.monoNanosNow
+        finally
+          if let some afterEach := entry.afterEach? then
+            afterEach
       let elapsed := stop - start
       let sampleIndex := samples.size
       samples := samples.push elapsed
