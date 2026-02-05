@@ -5,9 +5,11 @@
 /artifacts/metrics.json
 /artifacts/metrics-*.json
 /artifacts/trace-profiler.json
+/artifacts/trace/
 /artifacts/lakefile.profile.toml
 /artifacts/report.json
 /artifacts/report.md
+/artifacts/sample_extras/
 /artifacts/treemap-*.png
 /benchdata/.lake
 /benchdata/.cache
