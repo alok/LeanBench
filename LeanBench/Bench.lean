@@ -9,6 +9,11 @@ structure BenchConfig where
   samples : Nat := 20
   minTimeMs : Nat := 0
   threads : Nat := 1
+  timeoutMs : Option Nat := none
+  retries : Nat := 0
+  priority : Nat := 0
+  group : Option String := none
+  threadsRequired : Nat := 1
   suite : Option String := none
   tags : List String := []
   bytes : Option Nat := none

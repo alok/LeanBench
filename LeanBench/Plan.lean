@@ -161,11 +161,18 @@ structure Lcg where
   let bytes := match cfg.bytes with | none => "null" | some v => toString v
   let flops := match cfg.flops with | none => "null" | some v => toString v
   let items := match cfg.items with | none => "null" | some v => toString v
+  let timeoutMs := match cfg.timeoutMs with | none => "null" | some v => toString v
+  let group := match cfg.group with | none => "null" | some s => jsonString s
   "{" ++
     "\"warmup\":" ++ toString cfg.warmup ++ "," ++
     "\"samples\":" ++ toString cfg.samples ++ "," ++
     "\"min_time_ms\":" ++ toString cfg.minTimeMs ++ "," ++
     "\"threads\":" ++ toString cfg.threads ++ "," ++
+    "\"timeout_ms\":" ++ timeoutMs ++ "," ++
+    "\"retries\":" ++ toString cfg.retries ++ "," ++
+    "\"priority\":" ++ toString cfg.priority ++ "," ++
+    "\"group\":" ++ group ++ "," ++
+    "\"threads_required\":" ++ toString cfg.threadsRequired ++ "," ++
     "\"bytes\":" ++ bytes ++ "," ++
     "\"flops\":" ++ flops ++ "," ++
     "\"items\":" ++ items ++
