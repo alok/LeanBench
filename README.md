@@ -219,9 +219,12 @@ region:
 - `setup?` / `teardown?` run once per bench run
 - `beforeEach?` / `afterEach?` run around each sample
 
-You can also emit per-sample JSON via `reportSample?`. Per-sample reports are
-written to an artifacts file when `--artifacts <dir>` is set and referenced via
-`sample_extras_path` in JSON output.
+`afterEach?` and `teardown?` run in `finally` blocks (best-effort cleanup), so
+they will be executed even if the benchmark `action` throws.
+
+You can also emit per-sample JSON via `reportSample?`. This hook is only
+executed when `--artifacts <dir>` is set; the collected output is written to an
+artifacts file and referenced via `sample_extras_path` in JSON output.
 
 ```lean
 import LeanBench
