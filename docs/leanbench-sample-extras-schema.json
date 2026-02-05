@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LeanBench Sample Extras Artifact",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "bench_id",
+    "bench_name",
+    "samples_ns",
+    "sample_extras"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "bench_id": {"type": "string"},
+    "bench_name": {"type": "string"},
+    "samples_ns": {
+      "type": "array",
+      "items": {"type": "integer"}
+    },
+    "sample_extras": {
+      "type": "array",
+      "items": {}
+    }
+  }
+}
+

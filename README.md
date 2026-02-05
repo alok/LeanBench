@@ -106,6 +106,8 @@ When `--artifacts <dir>` is set, trace and per-sample outputs are written under:
 - `<dir>/trace/*.json`
 - `<dir>/sample_extras/*.json`
 
+Artifact file formats are documented in `docs/leanbench-artifacts.md`.
+
 Baselines used by `--compare` can be either the legacy JSON array or the new
 schema object.
 
