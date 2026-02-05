@@ -8,7 +8,7 @@ import LeanBench.Plan
 
 namespace LeanBench
 
-@[inline] def leanbenchVersion : String := "0.2.1"
+@[inline] def leanbenchVersion : String := "0.3.0"
 @[inline] def jsonSchemaVersion : Nat := 1
 
 inductive OutputFormat where
