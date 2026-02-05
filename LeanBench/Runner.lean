@@ -2,6 +2,7 @@ import Std
 import Lean.Data.Json
 import Cli
 import LeanBench.Bench
+import LeanBench.Config
 import LeanBench.Json
 import LeanBench.Plan
 
@@ -21,6 +22,10 @@ inductive OutputFormat where
 structure CliConfig where
   format : OutputFormat := .pretty
   args : Array String := #[]
+  configPath? : Option System.FilePath := none
+  profile? : Option String := none
+  where? : Option String := none
+  printConfig : Bool := false
   listOnly : Bool := false
   listTags : Bool := false
   listSuites : Bool := false
@@ -33,6 +38,11 @@ structure CliConfig where
   warmup? : Option Nat := none
   minTimeMs? : Option Nat := none
   threads? : Option Nat := none
+  timeoutMs? : Option Nat := none
+  retries? : Option Nat := none
+  priority? : Option Nat := none
+  group? : Option String := none
+  threadsRequired? : Option Nat := none
   seed : Nat := 0
   shuffle : Bool := false
   partition : Option PartitionSpec := none
@@ -148,13 +158,156 @@ structure Regression where
       totalNs := total
       samples := n }
 
-@[inline] def applyOverrides (cfg : BenchConfig) (cli : CliConfig) : BenchConfig :=
-  { cfg with
-    warmup := cli.warmup?.getD cfg.warmup
-    samples := cli.samples?.getD cfg.samples
-    minTimeMs := cli.minTimeMs?.getD cfg.minTimeMs
-    threads := cli.threads?.getD cfg.threads
+@[inline] def patchFromCli (cli : CliConfig) : BenchConfigPatch :=
+  { warmup? := cli.warmup?
+    samples? := cli.samples?
+    minTimeMs? := cli.minTimeMs?
+    threads? := cli.threads?
+    timeoutMs? := cli.timeoutMs?
+    retries? := cli.retries?
+    priority? := cli.priority?
+    group? := cli.group?
+    threadsRequired? := cli.threadsRequired?
   }
+
+@[inline] def applyCliOverrides (cfg : BenchConfig) (cli : CliConfig) : BenchConfig :=
+  cfg.applyPatch (patchFromCli cli)
+
+structure EnvOverrides where
+  configPath? : Option System.FilePath := none
+  profile? : Option String := none
+  where? : Option String := none
+  printConfig : Bool := false
+  patch : BenchConfigPatch := default
+  deriving Inhabited
+
+def parseBool (raw : String) : Option Bool :=
+  let s := raw.trimAscii.toString.toLower
+  if s == "1" || s == "true" || s == "yes" || s == "on" then
+    some true
+  else if s == "0" || s == "false" || s == "no" || s == "off" then
+    some false
+  else
+    none
+
+def envBool (name : String) : IO (Option Bool) := do
+  match (← IO.getEnv name) with
+  | none => pure none
+  | some raw =>
+      match parseBool raw with
+      | some v => pure (some v)
+      | none => throw <| IO.userError s!"invalid boolean for {name}: {raw}"
+
+def envNat (name : String) : IO (Option Nat) := do
+  match (← IO.getEnv name) with
+  | none => pure none
+  | some raw =>
+      match raw.toNat? with
+      | some v => pure (some v)
+      | none => throw <| IO.userError s!"invalid Nat for {name}: {raw}"
+
+def envOverrides : IO EnvOverrides := do
+  let configPath? := (← IO.getEnv "LEANBENCH_CONFIG").map System.FilePath.mk
+  let profile? := (← IO.getEnv "LEANBENCH_PROFILE")
+  let where? := (← IO.getEnv "LEANBENCH_WHERE")
+  let printConfig := (← envBool "LEANBENCH_PRINT_CONFIG").getD false
+  let warmup? ← envNat "LEANBENCH_WARMUP"
+  let samples? ← envNat "LEANBENCH_SAMPLES"
+  let minTimeMs? ← envNat "LEANBENCH_MIN_TIME_MS"
+  let threads? ← envNat "LEANBENCH_THREADS"
+  let timeoutMs? ← envNat "LEANBENCH_TIMEOUT_MS"
+  let retries? ← envNat "LEANBENCH_RETRIES"
+  let priority? ← envNat "LEANBENCH_PRIORITY"
+  let group? := (← IO.getEnv "LEANBENCH_GROUP")
+  let threadsRequired? ← envNat "LEANBENCH_THREADS_REQUIRED"
+  let patch : BenchConfigPatch := {
+    warmup? := warmup?
+    samples? := samples?
+    minTimeMs? := minTimeMs?
+    threads? := threads?
+    timeoutMs? := timeoutMs?
+    retries? := retries?
+    priority? := priority?
+    group? := group?
+    threadsRequired? := threadsRequired?
+  }
+  return {
+    configPath? := configPath?
+    profile? := profile?
+    where? := where?
+    printConfig := printConfig
+    patch := patch
+  }
+
+def resolveConfigPath (cli? env? : Option System.FilePath) : IO (Option System.FilePath) := do
+  match cli? with
+  | some path => return some path
+  | none =>
+      match env? with
+      | some path => return some path
+      | none =>
+          let cwd ← IO.currentDir
+          let candidates := #[cwd / "leanbench.toml", cwd / "observatory.toml"]
+          for path in candidates do
+            if (← path.pathExists) then
+              return some path
+          return none
+
+@[inline] def parseWhereExpr (label : String) (raw : String) : IO FilterExpr := do
+  match parseFilterExpr raw with
+  | .ok e => pure e
+  | .error err => throw <| IO.userError s!"{label}: {err}"
+
+@[inline] def applyProfileOverrides (b : Bench) (profile : BenchProfile) : BenchConfig := Id.run do
+  let m := BenchMeta.ofBench b
+  let mut cfg := b.config.applyPatch profile.config
+  for o in profile.overrides do
+    if o.whereExpr.matches m then
+      cfg := cfg.applyPatch o.patch
+  return cfg
+
+@[inline] def renderBenchConfigPatchJson (p : BenchConfigPatch) : String :=
+  let natOrNull (v : Option Nat) : String :=
+    match v with
+    | some x => toString x
+    | none => "null"
+  let strOrNull (v : Option String) : String :=
+    match v with
+    | some x => jsonString x
+    | none => "null"
+  "{" ++
+    "\"warmup\":" ++ natOrNull p.warmup? ++ "," ++
+    "\"samples\":" ++ natOrNull p.samples? ++ "," ++
+    "\"min_time_ms\":" ++ natOrNull p.minTimeMs? ++ "," ++
+    "\"threads\":" ++ natOrNull p.threads? ++ "," ++
+    "\"timeout_ms\":" ++ natOrNull p.timeoutMs? ++ "," ++
+    "\"retries\":" ++ natOrNull p.retries? ++ "," ++
+    "\"priority\":" ++ natOrNull p.priority? ++ "," ++
+    "\"group\":" ++ strOrNull p.group? ++ "," ++
+    "\"threads_required\":" ++ natOrNull p.threadsRequired? ++
+  "}"
+
+@[inline] def renderResolvedConfigJson (configPath? : Option System.FilePath) (profile : Lean.Name)
+    (profileCfg : BenchConfigPatch) (envCfg : BenchConfigPatch) (cliCfg : BenchConfigPatch)
+    (overridesCount : Nat) (whereRaw? : Option String) (hasSelect : Bool) : String :=
+  let pathJson :=
+    match configPath? with
+    | some p => jsonString p.toString
+    | none => "null"
+  let whereJson :=
+    match whereRaw? with
+    | some s => jsonString s
+    | none => "null"
+  "{" ++
+    "\"config_path\":" ++ pathJson ++ "," ++
+    "\"profile\":" ++ jsonString profile.toString ++ "," ++
+    "\"where\":" ++ whereJson ++ "," ++
+    "\"profile_select\":" ++ (if hasSelect then "true" else "false") ++ "," ++
+    "\"overrides_count\":" ++ toString overridesCount ++ "," ++
+    "\"profile_patch\":" ++ renderBenchConfigPatchJson profileCfg ++ "," ++
+    "\"env_patch\":" ++ renderBenchConfigPatchJson envCfg ++ "," ++
+    "\"cli_patch\":" ++ renderBenchConfigPatchJson cliCfg ++
+  "}"
 
 @[inline] def containsSubstr (s pat : String) : Bool :=
   if pat.length == 0 then
@@ -245,8 +398,7 @@ structure Regression where
 @[inline] def jsonNatArray (xs : Array Nat) : String :=
   "[" ++ String.intercalate "," (xs.toList.map toString) ++ "]"
 
-@[inline] def runBench (entry : Bench) (cli : CliConfig) : IO BenchResult := do
-  let cfg := applyOverrides entry.config cli
+@[inline] def runBench (entry : Bench) (cfg : BenchConfig) (cli : CliConfig) : IO BenchResult := do
   let threads := effectiveThreads cfg
   let id := benchId entry
   let stem := safeBenchFileStem id
@@ -259,107 +411,121 @@ structure Regression where
         tasks := tasks.push (← IO.asTask (prio := .dedicated) entry.action)
       for t in tasks do
         let _ ← IO.wait t
-  try
-    if let some setup := entry.setup? then
-      setup
-    for _ in [0:cfg.warmup] do
-      if let some beforeEach := entry.beforeEach? then
-        beforeEach
-      try
-        runOnce
-      finally
-        if let some afterEach := entry.afterEach? then
-          afterEach
-
-    let minTimeNs := cfg.minTimeMs * nsPerMs
-    let mut samples : Array Nat := #[]
-    let mut sampleExtras : Array Lean.Json := #[]
-    let mut total : Nat := 0
-    while samples.size < cfg.samples || (minTimeNs > 0 && total < minTimeNs) do
-      if let some beforeEach := entry.beforeEach? then
-        beforeEach
-      let start ← IO.monoNanosNow
-      let stop ←
+  let totalAttempts := cfg.retries + 1
+  let runAttempt : IO BenchResult := do
+    try
+      if let some setup := entry.setup? then
+        setup
+      for _ in [0:cfg.warmup] do
+        if let some beforeEach := entry.beforeEach? then
+          beforeEach
         try
           runOnce
-          IO.monoNanosNow
         finally
           if let some afterEach := entry.afterEach? then
             afterEach
-      let elapsed := stop - start
-      let sampleIndex := samples.size
-      samples := samples.push elapsed
-      total := total + elapsed
-      match entry.reportSample? with
-      | none => pure ()
-      | some reportSample =>
-          match cli.artifactsDir with
-          | none => pure ()
-          | some _ =>
-              let ctx : SampleCtx := {
-                benchName := entry.name
-                benchId := id
-                suite := cfg.suite
-                tags := cfg.tags
-                config := cfg
-                sampleIndex := sampleIndex
-                elapsedNs := elapsed
-                threads := threads
-              }
-              sampleExtras := sampleExtras.push (← reportSample ctx)
 
-    let stats := statsOf samples
-    let extras ←
-      match entry.report? with
-      | none => pure none
-      | some report => some <$> report
+      let minTimeNs := cfg.minTimeMs * nsPerMs
+      let mut samples : Array Nat := #[]
+      let mut sampleExtras : Array Lean.Json := #[]
+      let mut total : Nat := 0
+      while samples.size < cfg.samples || (minTimeNs > 0 && total < minTimeNs) do
+        if let some beforeEach := entry.beforeEach? then
+          beforeEach
+        let start ← IO.monoNanosNow
+        let stop ←
+          try
+            runOnce
+            IO.monoNanosNow
+          finally
+            if let some afterEach := entry.afterEach? then
+              afterEach
+        let elapsed := stop - start
+        let sampleIndex := samples.size
+        samples := samples.push elapsed
+        total := total + elapsed
+        match entry.reportSample? with
+        | none => pure ()
+        | some reportSample =>
+            match cli.artifactsDir with
+            | none => pure ()
+            | some _ =>
+                let ctx : SampleCtx := {
+                  benchName := entry.name
+                  benchId := id
+                  suite := cfg.suite
+                  tags := cfg.tags
+                  config := cfg
+                  sampleIndex := sampleIndex
+                  elapsedNs := elapsed
+                  threads := threads
+                }
+                sampleExtras := sampleExtras.push (← reportSample ctx)
 
-    let sampleExtrasPath? ←
-      match (entry.reportSample?, cli.artifactsDir) with
-      | (some _, some dir) =>
-          let rel : System.FilePath := (System.FilePath.mk "sample_extras") / (stem ++ ".json")
-          let out := dir / rel
-          IO.FS.createDirAll (dir / "sample_extras")
-          let sampleExtrasJson := jsonArray (sampleExtras.map Lean.Json.compress)
-          let content :=
-            "{" ++
-              "\"schema_version\":" ++ toString jsonSchemaVersion ++ "," ++
-              "\"bench_id\":" ++ jsonString id ++ "," ++
-              "\"bench_name\":" ++ jsonString entry.name ++ "," ++
-              "\"samples_ns\":" ++ jsonNatArray samples ++ "," ++
-              "\"sample_extras\":" ++ sampleExtrasJson ++
-            "}"
-          IO.FS.writeFile out content
-          pure (some rel)
-      | _ => pure none
+      let stats := statsOf samples
+      let extras ←
+        match entry.report? with
+        | none => pure none
+        | some report => some <$> report
 
-    let (trace?, tracePath?) ←
-      match entry.trace? with
-      | none => pure (none, none)
-      | some report => do
-          let j ← report
-          match cli.artifactsDir with
-          | none => pure (some j, none)
-          | some dir =>
-              let rel : System.FilePath := (System.FilePath.mk "trace") / (stem ++ ".json")
-              let out := dir / rel
-              IO.FS.createDirAll (dir / "trace")
-              IO.FS.writeFile out (Lean.Json.compress j)
-              pure (none, some rel)
+      let sampleExtrasPath? ←
+        match (entry.reportSample?, cli.artifactsDir) with
+        | (some _, some dir) =>
+            let rel : System.FilePath := (System.FilePath.mk "sample_extras") / (stem ++ ".json")
+            let out := dir / rel
+            IO.FS.createDirAll (dir / "sample_extras")
+            let sampleExtrasJson := jsonArray (sampleExtras.map Lean.Json.compress)
+            let content :=
+              "{" ++
+                "\"schema_version\":" ++ toString jsonSchemaVersion ++ "," ++
+                "\"bench_id\":" ++ jsonString id ++ "," ++
+                "\"bench_name\":" ++ jsonString entry.name ++ "," ++
+                "\"samples_ns\":" ++ jsonNatArray samples ++ "," ++
+                "\"sample_extras\":" ++ sampleExtrasJson ++
+              "}"
+            IO.FS.writeFile out content
+            pure (some rel)
+        | _ => pure none
 
-    pure ({
-      entry := entry
-      config := cfg
-      stats := stats
-      samples := samples
-      extras := extras
-      trace := trace?
-      tracePath := tracePath?
-      sampleExtrasPath := sampleExtrasPath?
-    } : BenchResult)
-  finally
-    if let some teardown := entry.teardown? then
-      teardown
+      let (trace?, tracePath?) ←
+        match entry.trace? with
+        | none => pure (none, none)
+        | some report => do
+            let j ← report
+            match cli.artifactsDir with
+            | none => pure (some j, none)
+            | some dir =>
+                let rel : System.FilePath := (System.FilePath.mk "trace") / (stem ++ ".json")
+                let out := dir / rel
+                IO.FS.createDirAll (dir / "trace")
+                IO.FS.writeFile out (Lean.Json.compress j)
+                pure (none, some rel)
+
+      pure ({
+        entry := entry
+        config := cfg
+        stats := stats
+        samples := samples
+        extras := extras
+        trace := trace?
+        tracePath := tracePath?
+        sampleExtrasPath := sampleExtrasPath?
+      } : BenchResult)
+    finally
+      if let some teardown := entry.teardown? then
+        teardown
+
+  let rec loop : Nat → Nat → IO BenchResult
+    | 0, _attempt =>
+        runAttempt
+    | Nat.succ rem, attempt => do
+        try
+          runAttempt
+        catch e =>
+          unless cli.quiet do
+            IO.eprintln s!"bench {entry.name} failed (attempt {attempt + 1}/{totalAttempts}): {e}"
+          loop rem (attempt + 1)
+  loop cfg.retries 0
 
 @[inline] def padRight (s : String) (n : Nat) : String :=
   let len := s.length
@@ -796,6 +962,17 @@ structure Regression where
 
 @[inline] def configFromParsed (p : Cli.Parsed) : IO CliConfig := do
   let mut cfg : CliConfig := { args := argsFromParsed p }
+  match p.flag? "config" with
+  | some f => cfg := { cfg with configPath? := some (System.FilePath.mk (f.as! String)) }
+  | none => pure ()
+  match p.flag? "profile" with
+  | some f => cfg := { cfg with profile? := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "where" with
+  | some f => cfg := { cfg with where? := some (f.as! String) }
+  | none => pure ()
+  if p.hasFlag "print-config" then
+    cfg := { cfg with printConfig := true }
   if p.hasFlag "list" then
     cfg := { cfg with listOnly := true }
   if p.hasFlag "list-tags" then
@@ -827,6 +1004,21 @@ structure Regression where
   | none => pure ()
   match p.flag? "threads" with
   | some f => cfg := { cfg with threads? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "timeout-ms" with
+  | some f => cfg := { cfg with timeoutMs? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "retries" with
+  | some f => cfg := { cfg with retries? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "priority" with
+  | some f => cfg := { cfg with priority? := some (f.as! Nat) }
+  | none => pure ()
+  match p.flag? "group" with
+  | some f => cfg := { cfg with group? := some (f.as! String) }
+  | none => pure ()
+  match p.flag? "threads-required" with
+  | some f => cfg := { cfg with threadsRequired? := some (f.as! Nat) }
   | none => pure ()
   match p.flag? "seed" with
   | some f => cfg := { cfg with seed := (f.as! Nat) }
@@ -960,31 +1152,88 @@ structure Regression where
   | none => IO.println content
   | some path => IO.FS.writeFile path content
 
-@[inline] def planCoreOf (benches : Array Bench) (cfg : CliConfig) : PlanCore :=
-  let entries := benches.map fun b =>
-    entryOf b (applyOverrides b.config cfg)
+@[inline] def planCoreOf (runs : Array (Bench × BenchConfig)) (cfg : CliConfig) : PlanCore :=
+  let entries := runs.map fun (b, bc) =>
+    entryOf b bc
   { seed := cfg.seed
     shuffled := cfg.shuffle
     partition := cfg.partition
     entries := entries }
 
-@[inline] def buildPlanAndManifest (benches : Array Bench) (cfg : CliConfig) :
+@[inline] def buildPlanAndManifest (runs : Array (Bench × BenchConfig)) (cfg : CliConfig) :
     IO (PlanCore × String × RunManifest) := do
-  let core := planCoreOf benches cfg
+  let core := planCoreOf runs cfg
   let coreJson := renderPlanCoreJson core
   let planHash := hashStringHex coreJson
-  let manifest ← buildManifest planHash benches.size cfg.partition
+  let manifest ← buildManifest planHash runs.size cfg.partition
   return (core, planHash, manifest)
 
 @[inline] def runWithConfig (cfg : CliConfig) : IO UInt32 := do
   let cfg ← applyArtifacts cfg
+  let env ← envOverrides
+  let configPath? ← resolveConfigPath cfg.configPath? env.configPath?
+  let configFile? ←
+    match configPath? with
+    | some path =>
+        if (← path.pathExists) then
+          some <$> loadConfigFile path
+        else
+          throw <| IO.userError s!"config file not found: {path}"
+    | none => pure none
+
+  let profileName := Lean.Name.mkSimple <| (mergeOpt cfg.profile? env.profile?).getD "default"
+  let profile ←
+    match configFile? with
+    | some file =>
+        match resolveProfile file.profiles profileName with
+        | .ok p => pure p
+        | .error msg => throw <| IO.userError msg
+    | none => pure default
+
+  let whereRaw? := mergeOpt cfg.where? env.where?
+  let whereExpr? ←
+    match whereRaw? with
+    | none => pure none
+    | some raw => some <$> parseWhereExpr "--where/LEANBENCH_WHERE" raw
+
+  let usedConfig := configFile?.isSome
+  let printConfig := cfg.printConfig || env.printConfig
+  if printConfig || usedConfig then
+    let cliPatch := patchFromCli cfg
+    IO.eprintln "leanbench resolved config:"
+    IO.eprintln <| renderResolvedConfigJson configPath? profileName profile.config env.patch cliPatch
+      profile.overrides.size whereRaw? profile.select?.isSome
+
+  let suiteName? := mergeOpt cfg.filterSuite (← IO.getEnv "LEANBENCH_SUITE")
+  let suitePred? ← resolveSuiteFilter suiteName?
   let benches ← listBenches
-  let suitePred? ← resolveSuiteFilter cfg.filterSuite
-  let benches := benches.filter (fun b => shouldKeep b cfg suitePred?)
+  let benches := benches.filter fun b => Id.run do
+    let m := BenchMeta.ofBench b
+    let baseOk := shouldKeep b cfg suitePred?
+    let profileOk :=
+      match profile.select? with
+      | none => true
+      | some sel => sel.matches m
+    let whereOk :=
+      match whereExpr? with
+      | none => true
+      | some w => w.matches m
+    return baseOk && profileOk && whereOk
   let benches := if cfg.shuffle then shuffleBenches benches cfg.seed else benches
   let benches := match cfg.partition with
     | none => benches
     | some p => partitionBenches benches p
+  let cliPatch := patchFromCli cfg
+  let runs : Array (Bench × BenchConfig) :=
+    benches.map fun b => Id.run do
+      let m := BenchMeta.ofBench b
+      let mut cfg := BenchConfig.applyPatch b.config profile.config
+      for o in profile.overrides do
+        if o.whereExpr.matches m then
+          cfg := BenchConfig.applyPatch cfg o.patch
+      cfg := BenchConfig.applyPatch cfg env.patch
+      cfg := BenchConfig.applyPatch cfg cliPatch
+      return (b, cfg)
   if cfg.listTags || cfg.listSuites then
     let suites ← listSuites
     if cfg.listTags then
@@ -998,7 +1247,7 @@ structure Regression where
     return (0 : UInt32)
   if cfg.listOnly then
     if cfg.format == .json then
-      let entries := benches.map fun b => entryOf b (applyOverrides b.config cfg)
+      let entries := runs.map fun (b, bc) => entryOf b bc
       let output := renderBenchListJson entries
       writeOutput output cfg.jsonOut
     else
@@ -1008,19 +1257,19 @@ structure Regression where
   if (cfg.failOnRegressions || hasRegressionThresholds cfg) && cfg.comparePath.isNone then
     throw <| IO.userError "regression checks require --compare"
   if cfg.planOnly then
-    let (core, _, manifest) ← buildPlanAndManifest benches cfg
+    let (core, _, manifest) ← buildPlanAndManifest runs cfg
     let planJson := renderPlanJson core manifest
     writeOutput planJson cfg.planOut
     if let some path := cfg.manifestOut then
       writeOutput (renderManifestJson manifest) (some path)
     return (0 : UInt32)
-  if benches.size == 0 then
-    IO.eprintln "no benchmarks registered"
+  if runs.size == 0 then
+    IO.eprintln "no benchmarks selected"
     return (1 : UInt32)
   let needManifest := cfg.manifestOut.isSome || cfg.format == .json || cfg.format == .jsonl
   let mut runMetaJson? : Option String := none
   if needManifest then
-    let (_, _, manifest) ← buildPlanAndManifest benches cfg
+    let (_, _, manifest) ← buildPlanAndManifest runs cfg
     if let some path := cfg.manifestOut then
       writeOutput (renderManifestJson manifest) (some path)
     if cfg.format == .json || cfg.format == .jsonl then
@@ -1028,11 +1277,10 @@ structure Regression where
       let manifestHash := hashStringHex manifestJson
       runMetaJson? := some (renderRunMetaJson manifest manifestHash cfg.args)
   let mut results : Array BenchResult := #[]
-  for b in benches do
+  for (b, bc) in runs do
     unless cfg.quiet do
-      let cfg' := applyOverrides b.config cfg
-      IO.eprintln s!"bench {b.name} (warmup {cfg'.warmup}, samples {cfg'.samples})"
-    let r ← runBench b cfg
+      IO.eprintln s!"bench {b.name} (warmup {bc.warmup}, samples {bc.samples})"
+    let r ← runBench b bc cfg
     results := results.push r
   let baseline? ←
     match cfg.comparePath with
@@ -1088,6 +1336,10 @@ open Cli
 def leanbenchCmd : Cmd := `[Cli|
   leanbench VIA runLeanbenchCmd; [leanbenchVersion] "LeanBench benchmark runner."
   FLAGS:
+    config : String; "Path to leanbench.toml/observatory.toml (optional)."
+    profile : String; "Config profile name (default: default)."
+    "where" : String; "Filter benches with DSL: suite(x), tag(y), name(/re/), and/or/not."
+    "print-config"; "Print resolved config before running."
     list; "List available benchmarks."
     "list-tags"; "List tags (respects filters)."
     "list-suites"; "List suites (respects filters)."
@@ -1099,6 +1351,11 @@ def leanbenchCmd : Cmd := `[Cli|
     warmup : Nat; "Override warmup count."
     "min-time-ms" : Nat; "Run until total time reaches N ms."
     threads : Nat; "Run each sample with N parallel action tasks."
+    "timeout-ms" : Nat; "Set timeout metadata for each bench (ms)."
+    retries : Nat; "Retry a failing bench up to N times."
+    priority : Nat; "Set priority metadata for each bench."
+    group : String; "Set group metadata for each bench."
+    "threads-required" : Nat; "Set threads_required metadata for each bench."
     seed : Nat; "Seed for deterministic shuffling."
     shuffle; "Shuffle benchmark order deterministically (use --seed)."
     partition : String; "Partition benches: count:m/n or hash:m/n."
